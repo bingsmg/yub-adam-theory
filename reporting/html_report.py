@@ -1,150 +1,675 @@
-"""HTML report generation using Jinja2 + Plotly."""
+"""Enhanced HTML report with Plotly charts and modern design."""
 
 from __future__ import annotations
 
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 
+import plotly.graph_objects as go
+import plotly.express as px
 from loguru import logger
 
 from config.schema import DailyRecommendation, AdamSignal
 from config.settings import settings
 
 
-_HTML_TEMPLATE = """<!DOCTYPE html>
+def _make_charts(result: DailyRecommendation) -> dict[str, str]:
+    """Generate Plotly chart divs. Returns dict of chart_name -> html_div."""
+    charts = {}
+    recs = result.recommendations
+    if not recs:
+        return charts
+
+    symbols = [r.symbol for r in recs]
+    names = [r.name for r in recs]
+    clues = [len(r.clues) for r in recs]
+    risk_scores = [r.risk_score for r in recs]
+    close_prices = [r.current_close for r in recs]
+    stop_losses = [r.stop_loss_price for r in recs]
+    stop_pcts = [(r.current_close - r.stop_loss_price) / r.current_close * 100 for r in recs]
+    directions = [r.projection.projected_direction for r in recs]
+    convergence = [r.projection.convergence_score for r in recs]
+    vol_ratios = [r.volume_ratio for r in recs]
+
+    # Color by risk
+    def risk_color(s):
+        if s <= 3: return '#27ae60'
+        elif s <= 5: return '#f39c12'
+        elif s <= 7: return '#e67e22'
+        return '#e74c3c'
+
+    bar_colors = [risk_color(s) for s in risk_scores]
+
+    # ── Chart 1: Risk Score + Stop Loss % ──
+    fig1 = go.Figure()
+    fig1.add_trace(go.Bar(
+        x=symbols, y=risk_scores,
+        marker_color=bar_colors,
+        text=[f'{s:.1f}' for s in risk_scores],
+        textposition='outside',
+        name='Risk Score',
+        hovertemplate='%{x}<br>Risk: %{y:.1f}/10<extra></extra>'
+    ))
+    fig1.add_trace(go.Scatter(
+        x=symbols, y=stop_pcts,
+        mode='markers+lines',
+        marker=dict(size=10, color='#e74c3c', symbol='diamond'),
+        line=dict(dash='dot', color='#e74c3c'),
+        name='Stop Loss %',
+        yaxis='y2',
+        hovertemplate='%{x}<br>Stop: %{y:.1f}%<extra></extra>'
+    ))
+    fig1.update_layout(
+        title=dict(text='Risk Score & Stop Loss Distance', font=dict(size=16)),
+        xaxis=dict(title='Stock', tickangle=-45),
+        yaxis=dict(title='Risk Score (1-10)', range=[0, 11], gridcolor='#eee'),
+        yaxis2=dict(title='Stop Loss %', overlaying='y', side='right', showgrid=False),
+        height=400,
+        margin=dict(l=40, r=60, t=50, b=80),
+        template='plotly_white',
+        legend=dict(x=0.01, y=0.99),
+        bargap=0.3,
+    )
+    charts['risk_chart'] = fig1.to_html(full_html=False, include_plotlyjs=False)
+
+    # ── Chart 2: Quality vs Risk scatter ──
+    # Compute quality scores via scorer
+    from signals.scorer import compute_quality_score
+    quality_scores = [compute_quality_score(r) for r in recs]
+
+    fig2 = go.Figure()
+    for i, r in enumerate(recs):
+        fig2.add_trace(go.Scatter(
+            x=[quality_scores[i]], y=[risk_scores[i]],
+            mode='markers+text',
+            marker=dict(size=max(12, quality_scores[i]*0.5), color=bar_colors[i]),
+            text=[f'#{i+1} {r.symbol}'],
+            textposition='top center',
+            name=f'{r.symbol} {r.name}',
+            hovertemplate=(
+                f'<b>{r.name}</b> ({r.symbol})<br>'
+                f'Quality: {quality_scores[i]:.0f}/100<br>'
+                f'Risk: {risk_scores[i]:.1f}/10<br>'
+                f'Clues: {clues[i]}/3<extra></extra>'
+            )
+        ))
+    fig2.update_layout(
+        title=dict(text='Quality Score vs Risk (bubble size = quality)', font=dict(size=16)),
+        xaxis=dict(title='Quality Score (0-100)', gridcolor='#eee'),
+        yaxis=dict(title='Risk Score (1-10)', gridcolor='#eee', autorange='reversed'),
+        height=400,
+        margin=dict(l=40, r=40, t=50, b=40),
+        template='plotly_white',
+        showlegend=False,
+    )
+    # Add quadrant lines
+    fig2.add_hline(y=5, line_dash='dash', line_color='#f39c12', opacity=0.5)
+    fig2.add_vline(x=50, line_dash='dash', line_color='#3498db', opacity=0.5)
+    charts['quality_chart'] = fig2.to_html(full_html=False, include_plotlyjs=False)
+
+    # ── Chart 3: Volume Ratio ──
+    fig3 = go.Figure()
+    fig3.add_trace(go.Bar(
+        x=symbols, y=vol_ratios,
+        marker_color=['#27ae60' if v >= 1.5 else '#f39c12' if v >= 0.7 else '#e74c3c' for v in vol_ratios],
+        text=[f'{v:.1f}x' for v in vol_ratios],
+        textposition='outside',
+        hovertemplate='%{x}<br>Volume: %{y:.1f}x avg<extra></extra>'
+    ))
+    fig3.add_hline(y=1.0, line_dash='dash', line_color='gray', annotation_text='Normal')
+    fig3.update_layout(
+        title=dict(text='Volume Ratio (vs 20-day avg)', font=dict(size=16)),
+        xaxis=dict(tickangle=-45),
+        yaxis=dict(title='Volume Ratio', gridcolor='#eee'),
+        height=350,
+        margin=dict(l=40, r=40, t=50, b=80),
+        template='plotly_white',
+        bargap=0.3,
+    )
+    charts['volume_chart'] = fig3.to_html(full_html=False, include_plotlyjs=False)
+
+    # ── Chart 4: Clue composition ──
+    clue_types = {'breakout': 0, 'trend_change': 0, 'range_expansion': 0}
+    for r in recs:
+        for c in r.clues:
+            ct = c.clue_type
+            if ct in clue_types:
+                clue_types[ct] += 1
+
+    fig4 = go.Figure(data=[go.Pie(
+        labels=['Breakout (突破)', 'Trend Change (趋势改变)', 'Gap/Wide Range (缺口/宽幅)'],
+        values=[clue_types['breakout'], clue_types['trend_change'], clue_types['range_expansion']],
+        marker_colors=['#3498db', '#2ecc71', '#e74c3c'],
+        hole=0.4,
+        textinfo='label+value',
+        hovertemplate='%{label}: %{value} signals<extra></extra>'
+    )])
+    fig4.update_layout(
+        title=dict(text='Signal Clue Composition', font=dict(size=16)),
+        height=350,
+        margin=dict(l=20, r=20, t=50, b=20),
+        template='plotly_white',
+    )
+    charts['clue_pie'] = fig4.to_html(full_html=False, include_plotlyjs=False)
+
+    # ── Chart 5: Direction + Convergence ──
+    dir_colors = {'up': '#27ae60', 'down': '#e74c3c', 'neutral': '#95a5a6'}
+    fig5 = go.Figure()
+    fig5.add_trace(go.Bar(
+        x=symbols, y=convergence,
+        marker_color=[dir_colors.get(d, '#95a5a6') for d in directions],
+        text=[f'{c:.3f} ({d.upper()})' for c, d in zip(convergence, directions)],
+        textposition='outside',
+        hovertemplate='%{x}<br>Convergence: %{y:.3f}<br>Direction: %{text}<extra></extra>'
+    ))
+    fig5.update_layout(
+        title=dict(text='Center Symmetry Projection: Convergence by Direction', font=dict(size=16)),
+        xaxis=dict(tickangle=-45),
+        yaxis=dict(title='Convergence Score (higher = more reliable)', range=[0.8, 1.0], gridcolor='#eee'),
+        height=350,
+        margin=dict(l=40, r=40, t=50, b=80),
+        template='plotly_white',
+        bargap=0.3,
+    )
+    charts['direction_chart'] = fig5.to_html(full_html=False, include_plotlyjs=False)
+
+    return charts
+
+
+_HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Adam's Theory Recommendations — {{ market_date }}</title>
+<title>Adam's Theory — {{ market_date }}</title>
+<script src="https://cdn.plot.ly/plotly-3.1.0.min.js"></script>
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-         max-width: 1200px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
-  h1 { color: #1a1a2e; border-bottom: 3px solid #16213e; padding-bottom: 10px; }
-  h2 { color: #0f3460; margin-top: 30px; }
-  .summary { background: white; padding: 15px; border-radius: 8px; margin: 15px 0;
-             box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-  .summary span { margin-right: 20px; }
-  table { width: 100%; border-collapse: collapse; background: white;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
-  th { background: #16213e; color: white; padding: 12px 8px; text-align: left; }
-  td { padding: 10px 8px; border-bottom: 1px solid #eee; }
-  tr:hover { background: #f8f9fa; }
-  .risk-low { color: #27ae60; font-weight: bold; }
-  .risk-moderate { color: #f39c12; font-weight: bold; }
-  .risk-elevated { color: #e67e22; font-weight: bold; }
-  .risk-high { color: #e74c3c; font-weight: bold; }
-  .card { background: white; padding: 20px; border-radius: 8px; margin: 20px 0;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-  .card h3 { margin-top: 0; color: #16213e; }
-  .clue { padding: 8px 12px; margin: 5px 0; background: #e8f4f8;
-          border-left: 4px solid #2980b9; border-radius: 4px; }
-  .chart { margin: 20px 0; }
-  .footer { text-align: center; color: #999; margin-top: 50px; font-size: 0.9em; }
+  :root {
+    --bg: #f0f2f5;
+    --card: #ffffff;
+    --primary: #1a1a2e;
+    --accent: #e94560;
+    --blue: #3498db;
+    --green: #27ae60;
+    --orange: #f39c12;
+    --red: #e74c3c;
+    --text: #2c3e50;
+    --text-light: #7f8c8d;
+    --border: #e1e5eb;
+    --shadow: 0 2px 8px rgba(0,0,0,0.08);
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  /* ── Hero Header ── */
+  .hero {
+    background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+    color: white;
+    padding: 40px 20px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -50%; left: -50%;
+    width: 200%; height: 200%;
+    background: radial-gradient(circle at 30% 50%, rgba(233,69,96,0.15) 0%, transparent 50%),
+                radial-gradient(circle at 70% 50%, rgba(52,152,219,0.1) 0%, transparent 50%);
+    animation: float 20s ease-in-out infinite;
+  }
+  @keyframes float {
+    0%, 100% { transform: translate(0, 0); }
+    50% { transform: translate(30px, -20px); }
+  }
+  .hero h1 {
+    font-size: 2.2em;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    position: relative;
+    z-index: 1;
+  }
+  .hero .subtitle {
+    font-size: 1em;
+    opacity: 0.8;
+    margin-top: 8px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ── Container ── */
+  .container {
+    max-width: 1300px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+
+  /* ── Metric Cards ── */
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin: -30px 0 24px 0;
+    position: relative;
+    z-index: 2;
+  }
+  .metric-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+    text-align: center;
+    border-top: 4px solid var(--blue);
+    transition: transform 0.2s;
+  }
+  .metric-card:hover { transform: translateY(-2px); }
+  .metric-card.warn { border-top-color: var(--orange); }
+  .metric-card.success { border-top-color: var(--green); }
+  .metric-card.danger { border-top-color: var(--red); }
+  .metric-card .value {
+    font-size: 2em;
+    font-weight: 700;
+    color: var(--primary);
+  }
+  .metric-card .label {
+    font-size: 0.85em;
+    color: var(--text-light);
+    margin-top: 4px;
+  }
+
+  /* ── Section ── */
+  .section {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow);
+  }
+  .section h2 {
+    font-size: 1.3em;
+    color: var(--primary);
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ── Charts Grid ── */
+  .charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+    gap: 16px;
+  }
+  .chart-box {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 12px;
+    box-shadow: var(--shadow);
+  }
+  .chart-box.full { grid-column: 1 / -1; }
+
+  /* ── Table ── */
+  .table-wrap { overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92em;
+  }
+  th {
+    background: var(--primary);
+    color: white;
+    padding: 12px 10px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  td {
+    padding: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  tr:hover td { background: #f8f9fc; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.8em;
+    font-weight: 600;
+    margin: 1px 2px;
+  }
+  .badge-b { background: #dbeafe; color: #1e40af; }
+  .badge-t { background: #dcfce7; color: #166534; }
+  .badge-r { background: #fee2e2; color: #991b1b; }
+  .badge-miss { background: #f5f5f5; color: #bbb; text-decoration: line-through; }
+
+  /* ── Risk Colors ── */
+  .risk-low { color: var(--green); font-weight: 700; }
+  .risk-moderate { color: var(--orange); font-weight: 700; }
+  .risk-elevated { color: #e67e22; font-weight: 700; }
+  .risk-high { color: var(--red); font-weight: 700; }
+
+  /* ── Recommendation Cards ── */
+  .rec-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(600px, 1fr));
+    gap: 16px;
+  }
+  .rec-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .rec-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  }
+  .rec-card-header {
+    padding: 16px 20px;
+    color: white;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .rec-card-header.risk-3 { background: linear-gradient(135deg, #27ae60, #2ecc71); }
+  .rec-card-header.risk-5 { background: linear-gradient(135deg, #f39c12, #e67e22); }
+  .rec-card-header.risk-7 { background: linear-gradient(135deg, #e67e22, #e74c3c); }
+  .rec-card-body { padding: 20px; }
+  .rec-card-body .clue-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid #f5f5f5;
+  }
+  .rec-card-body .clue-row:last-child { border-bottom: none; }
+  .clue-icon { font-size: 1.2em; width: 28px; text-align: center; flex-shrink: 0; }
+  .clue-miss { color: #ccc; }
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin: 12px 0;
+    padding: 12px;
+    background: #f8f9fc;
+    border-radius: 8px;
+  }
+  .info-item .info-label { font-size: 0.78em; color: var(--text-light); }
+  .info-item .info-value { font-weight: 600; font-size: 0.95em; }
+
+  .reason-block {
+    background: #fafafa;
+    border-left: 3px solid var(--blue);
+    padding: 12px 16px;
+    margin-top: 12px;
+    border-radius: 0 8px 8px 0;
+    font-size: 0.88em;
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  /* ── Footer ── */
+  .footer {
+    text-align: center;
+    color: var(--text-light);
+    padding: 30px;
+    font-size: 0.85em;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .hero h1 { font-size: 1.5em; }
+    .charts-grid { grid-template-columns: 1fr; }
+    .rec-cards { grid-template-columns: 1fr; }
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+  }
 </style>
 </head>
 <body>
-<h1>🔍 Adam's Theory A-Share Recommendations</h1>
 
-<div class="summary">
-  <strong>Market Date:</strong> <span>{{ market_date }}</span>
-  <strong>Generated:</strong> <span>{{ generated_at }}</span>
-  <strong>Market Regime:</strong> <span>{{ market_regime_desc }}</span>
-  <strong>CSI 300 ADX:</strong> <span>{{ "%.1f"|format(index_adx or 0) }}</span>
-</div>
-
-<div class="summary">
-  <span>📊 Stocks Analyzed: <strong>{{ total_stocks_analyzed }}</strong></span>
-  <span>🎯 Signals Found: <strong>{{ total_signals_found }}</strong></span>
-  <span>✅ Recommended: <strong>{{ recommendations|length }}</strong></span>
-</div>
-
-{% if not recommendations %}
-<p style="color:#e67e22;">⚠️ No buy signals found for today. Market conditions may not be favorable for Adam's Theory entries.</p>
-{% else %}
-
-<h2>📈 Recommendation Summary</h2>
-<table>
-<thead>
-<tr>
-  <th>#</th><th>Code</th><th>Name</th><th>Close</th><th>Clues</th>
-  <th>ADX</th><th>ER</th><th>Risk</th><th>Stop Loss</th><th>Direction</th>
-</tr>
-</thead>
-<tbody>
-{% for rec in recommendations %}
-<tr>
-  <td>{{ loop.index }}</td>
-  <td>{{ rec.symbol }}</td>
-  <td>{{ rec.name }}</td>
-  <td>¥{{ "%.2f"|format(rec.current_close) }}</td>
-  <td>{{ rec.clues|map(attribute='clue_type')|join(', ') }}</td>
-  <td>{{ "%.1f"|format(rec.adx) }}</td>
-  <td>{{ "%.3f"|format(rec.efficiency_ratio) }}</td>
-  <td class="{% if rec.risk_score <= 3 %}risk-low{% elif rec.risk_score <= 5 %}risk-moderate{% elif rec.risk_score <= 7 %}risk-elevated{% else %}risk-high{% endif %}">
-    {{ "%.1f"|format(rec.risk_score) }}
-  </td>
-  <td>¥{{ "%.2f"|format(rec.stop_loss_price) }}</td>
-  <td>{{ rec.projection.projected_direction }}</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-
-<h2>📋 Detailed Analysis</h2>
-{% for rec in recommendations %}
-<div class="card">
-  <h3>#{{ loop.index }} {{ rec.name }} ({{ rec.symbol }}) — ¥{{ "%.2f"|format(rec.current_close) }}</h3>
-  <p><strong>Risk:</strong>
-    <span class="{% if rec.risk_score <= 3 %}risk-low{% elif rec.risk_score <= 5 %}risk-moderate{% elif rec.risk_score <= 7 %}risk-elevated{% else %}risk-high{% endif %}">
-      {{ "%.1f"|format(rec.risk_score) }}/10
-    </span>
-    | <strong>Stop Loss:</strong> ¥{{ "%.2f"|format(rec.stop_loss_price) }}
-    | <strong>ADX:</strong> {{ "%.1f"|format(rec.adx) }}
-    | <strong>ER:</strong> {{ "%.3f"|format(rec.efficiency_ratio) }}
-    | <strong>Trend:</strong> {{ rec.trend_strength }}
-  </p>
-
-  <h4>Entry Signals ({{ rec.clues|length }}):</h4>
-  {% for clue in rec.clues %}
-  <div class="clue">
-    <strong>[{{ "%.2f"|format(clue.strength) }}] {{ clue.clue_type }}</strong><br>
-    {{ clue.detail }}
+<div class="hero">
+  <h1>🔍 Adam's Theory A-Share Recommendations</h1>
+  <div class="subtitle">
+    Market Date: <strong>{{ market_date }}</strong> &nbsp;|&nbsp;
+    Generated: {{ generated_at }} &nbsp;|&nbsp;
+    CSI 300 ADX: {{ "%.1f"|format(index_adx or 0) }}
   </div>
-  {% endfor %}
-
-  <h4>Center Symmetry Projection:</h4>
-  <p>
-    <strong>Direction:</strong> {{ rec.projection.projected_direction.upper() }}
-    | <strong>Convergence:</strong> {{ "%.3f"|format(rec.projection.convergence_score) }}
-    | <strong>Anchor:</strong> ¥{{ "%.2f"|format(rec.projection.anchor_price) }}
-    {% if rec.projection.projected_prices %}
-    | <strong>1st Target:</strong> ¥{{ "%.2f"|format(rec.projection.projected_prices[0]) }}
-    {% endif %}
-  </p>
-
-  <pre style="white-space: pre-wrap; background: #f8f9fa; padding: 10px; border-radius: 4px;">{{ rec.reason }}</pre>
 </div>
-{% endfor %}
 
-{% endif %}
+<div class="container">
 
-<div class="footer">
-  🤖 Generated by Adam's Theory Stock Picker &mdash; {{ generated_at }}<br>
-  <em>Disclaimer: This is for reference only. Trading involves substantial risk. Do your own research.</em>
+  <!-- Metrics -->
+  <div class="metrics">
+    <div class="metric-card success">
+      <div class="value">{{ recommendations|length }}</div>
+      <div class="label">✅ Buy Recommendations</div>
+    </div>
+    <div class="metric-card">
+      <div class="value">{{ total_signals_found }}</div>
+      <div class="label">🎯 Raw Signals Found</div>
+    </div>
+    <div class="metric-card">
+      <div class="value">{{ total_stocks_analyzed }}</div>
+      <div class="label">📊 Stocks Analyzed</div>
+    </div>
+    <div class="metric-card warn">
+      <div class="value">{{ "%.0f"|format((total_signals_found / total_stocks_analyzed * 100) if total_stocks_analyzed else 0) }}%</div>
+      <div class="label">📈 Signal Rate</div>
+    </div>
+    {% set avg_risk = (recommendations|map(attribute='risk_score')|sum / recommendations|length) if recommendations else 0 %}
+    <div class="metric-card {% if avg_risk <= 4 %}success{% elif avg_risk <= 6 %}warn{% else %}danger{% endif %}">
+      <div class="value">{{ "%.1f"|format(avg_risk) }}</div>
+      <div class="label">⚖️ Avg Risk Score</div>
+    </div>
+  </div>
+
+  {% if not recommendations %}
+  <div class="section">
+    <p style="color:#e67e22; text-align:center; font-size:1.1em;">
+      ⚠️ No buy signals found. Market conditions may not be favorable for Adam's Theory entries.
+    </p>
+  </div>
+  {% else %}
+
+  <!-- Charts -->
+  <div class="section">
+    <h2>📊 Visual Dashboard</h2>
+    <div class="charts-grid">
+      {% if charts.get('risk_chart') %}
+      <div class="chart-box">{{ charts['risk_chart'] | safe }}</div>
+      {% endif %}
+      {% if charts.get('quality_chart') %}
+      <div class="chart-box">{{ charts['quality_chart'] | safe }}</div>
+      {% endif %}
+      {% if charts.get('volume_chart') %}
+      <div class="chart-box">{{ charts['volume_chart'] | safe }}</div>
+      {% endif %}
+      {% if charts.get('direction_chart') %}
+      <div class="chart-box">{{ charts['direction_chart'] | safe }}</div>
+      {% endif %}
+      {% if charts.get('clue_pie') %}
+      <div class="chart-box full" style="max-width:500px; margin:0 auto;">{{ charts['clue_pie'] | safe }}</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Summary Table -->
+  <div class="section">
+    <h2>📈 Recommendation Summary</h2>
+    <div class="table-wrap">
+    <table>
+    <thead>
+    <tr>
+      <th>#</th><th>Code</th><th>Name</th><th>Close</th>
+      <th>Met</th><th>Missing</th>
+      <th>Proj</th><th>Risk</th><th>Stop</th><th>Stop%</th><th>Vol</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for rec in recommendations %}
+    {% set all_clues = ['breakout', 'trend_change', 'range_expansion'] %}
+    {% set met = rec.clues|map(attribute='clue_type')|list %}
+    {% set missing = all_clues|reject('in', met)|list %}
+    <tr>
+      <td><strong>{{ loop.index }}</strong></td>
+      <td><code>{{ rec.symbol }}</code></td>
+      <td>{{ rec.name }}</td>
+      <td>¥{{ "%.2f"|format(rec.current_close) }}</td>
+      <td>
+        {% for c in rec.clues %}
+        <span class="badge badge-{{ 'b' if c.clue_type == 'breakout' else 't' if c.clue_type == 'trend_change' else 'r' }}">
+          {{ 'B' if c.clue_type == 'breakout' else 'T' if c.clue_type == 'trend_change' else 'R' }}
+        </span>
+        {% endfor %}
+      </td>
+      <td>
+        {% for m in missing %}
+        <span class="badge badge-miss">{{ 'B' if m == 'breakout' else 'T' if m == 'trend_change' else 'R' }}</span>
+        {% endfor %}
+      </td>
+      <td style="color:{{ '#27ae60' if rec.projection.projected_direction == 'up' else '#e74c3c' if rec.projection.projected_direction == 'down' else '#95a5a6' }}">
+        {{ rec.projection.projected_direction.upper() }}
+      </td>
+      <td class="{% if rec.risk_score <= 3 %}risk-low{% elif rec.risk_score <= 5 %}risk-moderate{% elif rec.risk_score <= 7 %}risk-elevated{% else %}risk-high{% endif %}">
+        {{ "%.1f"|format(rec.risk_score) }}
+      </td>
+      <td>¥{{ "%.2f"|format(rec.stop_loss_price) }}</td>
+      <td>{{ "%.1f"|format((rec.current_close - rec.stop_loss_price) / rec.current_close * 100) }}%</td>
+      <td>{{ "%.1f"|format(rec.volume_ratio) }}x</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+    </table>
+    </div>
+    <p style="margin-top:8px; font-size:0.8em; color:var(--text-light);">
+      B=Breakout(突破) T=Trend Change(趋势改变) R=Gap/Wide Range(缺口/宽幅)
+    </p>
+  </div>
+
+  <!-- Detailed Cards -->
+  <div class="section">
+    <h2>📋 Detailed Analysis</h2>
+    <div class="rec-cards">
+    {% for rec in recommendations %}
+    {% set risk_class = 'risk-3' if rec.risk_score <= 3 else 'risk-5' if rec.risk_score <= 6 else 'risk-7' %}
+    <div class="rec-card">
+      <div class="rec-card-header {{ risk_class }}">
+        <div>
+          <strong style="font-size:1.1em;">#{{ loop.index }} {{ rec.name }}</strong>
+          <code style="opacity:0.9; margin-left:8px;">{{ rec.symbol }}</code>
+        </div>
+        <div style="font-size:1.3em; font-weight:700;">¥{{ "%.2f"|format(rec.current_close) }}</div>
+      </div>
+
+      <div class="rec-card-body">
+        <!-- Condition Clues -->
+        {% set all_clues = ['breakout', 'trend_change', 'range_expansion'] %}
+        {% set met_types = rec.clues|map(attribute='clue_type')|list %}
+        <div>
+        {% for clue in rec.clues %}
+        <div class="clue-row">
+          <span class="clue-icon">✅</span>
+          <div>
+            <strong>
+              {% if clue.clue_type == 'breakout' %}Breakout (突破)
+              {% elif clue.clue_type == 'trend_change' %}Trend Change (趋势改变)
+              {% else %}Gap / Wide Range (缺口/宽幅){% endif %}
+            </strong>
+            <span style="color:var(--text-light);"> — strength: {{ "%.2f"|format(clue.strength) }}</span>
+            <br><small>{{ clue.detail }}</small>
+          </div>
+        </div>
+        {% endfor %}
+        {% for ct in all_clues if ct not in met_types %}
+        <div class="clue-row clue-miss">
+          <span class="clue-icon">⛔</span>
+          <div>
+            <strong>
+              {% if ct == 'breakout' %}Breakout (突破)
+              {% elif ct == 'trend_change' %}Trend Change (趋势改变)
+              {% else %}Gap / Wide Range (缺口/宽幅){% endif %}
+            </strong>
+            <span style="color:#ccc;"> — not met</span>
+          </div>
+        </div>
+        {% endfor %}
+        </div>
+
+        <!-- Info Grid -->
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="info-label">Risk Score</div>
+            <div class="info-value {% if rec.risk_score <= 3 %}risk-low{% elif rec.risk_score <= 5 %}risk-moderate{% elif rec.risk_score <= 7 %}risk-elevated{% else %}risk-high{% endif %}">
+              {{ "%.1f"|format(rec.risk_score) }}/10
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Stop Loss</div>
+            <div class="info-value">¥{{ "%.2f"|format(rec.stop_loss_price) }} ({{ "%.1f"|format((rec.current_close - rec.stop_loss_price) / rec.current_close * 100) }}%)</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Projection</div>
+            <div class="info-value" style="color:{{ '#27ae60' if rec.projection.projected_direction == 'up' else '#e74c3c' if rec.projection.projected_direction == 'down' else '#95a5a6' }}">
+              {{ rec.projection.projected_direction.upper() }} (conv: {{ "%.3f"|format(rec.projection.convergence_score) }})
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Volume</div>
+            <div class="info-value">{{ "%.1f"|format(rec.volume_ratio) }}x avg</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">ATR</div>
+            <div class="info-value">¥{{ "%.2f"|format(rec.atr) }}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Anchor Price</div>
+            <div class="info-value">¥{{ "%.2f"|format(rec.projection.anchor_price) }}</div>
+          </div>
+        </div>
+
+        <!-- Reason -->
+        <div class="reason-block">{{ rec.reason }}</div>
+      </div>
+    </div>
+    {% endfor %}
+    </div>
+  </div>
+
+  {% endif %}
+
+  <div class="footer">
+    🤖 Generated by Adam's Theory Stock Picker — {{ generated_at }}<br>
+    <em>Disclaimer: For reference only. Trading involves substantial risk. Do your own research.</em>
+  </div>
 </div>
 </body>
-</html>
-"""
+</html>"""
 
 
-def generate_html_report(result: DailyRecommendation, output_path: Path | None = None) -> Path:
-    """
-    Generate an HTML report from recommendation results.
+def generate_html_report(
+    result: DailyRecommendation,
+    output_path: Path | None = None,
+    open_browser: bool = True,
+) -> Path:
+    """Generate an enhanced HTML report with Plotly charts.
 
     Args:
-        result: The daily recommendation with all signals.
-        output_path: Where to save. Default: output/reports/YYYY-MM-DD_report.html
+        result: Daily recommendation result.
+        output_path: Save path. Default: output/reports/YYYY-MM-DD_report.html
+        open_browser: Auto-open in browser after generation.
 
     Returns:
         Path to the generated HTML file.
@@ -152,25 +677,39 @@ def generate_html_report(result: DailyRecommendation, output_path: Path | None =
     try:
         from jinja2 import Template
     except ImportError:
-        logger.error("jinja2 not installed. Cannot generate HTML report.")
+        logger.error("jinja2 not installed.")
         raise
 
     if output_path is None:
         reports_dir = Path(settings.REPORTS_DIR)
         reports_dir.mkdir(parents=True, exist_ok=True)
-        output_path = reports_dir / f"{result.market_date.isoformat()}_report.html"
+        output_path = reports_dir / f"{result.market_date.strftime('%Y-%m-%d')}_report.html"
 
+    # Generate charts
+    charts = _make_charts(result)
+
+    # Render template
     template = Template(_HTML_TEMPLATE)
     html = template.render(
-        market_date=result.market_date.isoformat(),
+        market_date=result.market_date.strftime('%Y-%m-%d'),
         generated_at=result.generated_at.strftime("%Y-%m-%d %H:%M:%S"),
         index_adx=result.index_adx or 0,
         market_regime_desc=result.market_regime_desc,
         total_stocks_analyzed=result.total_stocks_analyzed,
         total_signals_found=result.total_signals_found,
         recommendations=result.recommendations,
+        charts=charts,
     )
 
     output_path.write_text(html, encoding="utf-8")
     logger.info("HTML report saved: {}", output_path)
+
+    # Auto-open in browser
+    if open_browser:
+        try:
+            webbrowser.open(str(output_path.resolve()))
+            logger.info("Opened report in browser")
+        except Exception as e:
+            logger.warning("Could not open browser: {}", e)
+
     return output_path

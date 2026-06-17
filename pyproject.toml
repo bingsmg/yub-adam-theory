@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "A-share stock recommendation system based on Adam's Theory of Markets"
 requires-python = ">=3.11"
 dependencies = [
-    "akshare>=1.14.0",
     "pandas>=2.0",
     "numpy>=1.24",
     "pandas-ta>=0.3.14b0",
@@ -17,10 +16,14 @@ dependencies = [
     "pyarrow>=14.0",
     "httpx>=0.25",
     "python-dotenv>=1.0",
+    # Data sources — baostock is the stable fallback, akshare is the fast primary
+    "baostock>=0.9",
+    "akshare>=1.18",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-cov>=4.0"]
+efinance = ["efinance>=0.5"]
 
 [build-system]
 requires = ["setuptools>=68.0"]
@@ -28,4 +31,4 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["config*", "data*", "indicators*", "signals*", "recommendation*", "reporting*", "backtesting*", "utils*"]
+include = ["config*", "data*", "indicators*", "signals*", "recommendation*", "reporting*", "utils*"]

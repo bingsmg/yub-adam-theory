@@ -93,12 +93,7 @@ def detect_signal(
     stop_pct = (current_close - stop_loss) / current_close * 100
 
     # ── 5. ATR for reference (not for gating, just context) ──────
-    try:
-        from indicators.market_regime import compute_atr
-        atr_series = compute_atr(df["high"], df["low"], df["close"], period=14)
-        current_atr = float(atr_series.iloc[-1])
-    except Exception:
-        current_atr = round(float(df["high"].iloc[-1] - df["low"].iloc[-1]), 2)
+    current_atr = round(float(df["high"].iloc[-1] - df["low"].iloc[-1]), 2)
 
     # ── 6. Volume context ────────────────────────────────────────
     if len(df) >= 21:

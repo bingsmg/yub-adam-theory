@@ -35,24 +35,21 @@ python -m pytest tests/ -v
 ## 项目结构
 
 ```
-├── main.py                  # CLI入口
 ├── config/                  # 配置 + 数据模型
 ├── data/                    # 数据获取 + 存储
-│   └── consolidated_store.py  # 单文件存储（all_stocks.parquet）
+│   └── consolidated_store.py  # 日期分区存储（output/daily/YYYY-MM-DD.parquet）
 ├── indicators/              # 亚当理论核心算法
 │   └── adams_theory.py      # 中心对称投影 + 三条件检测
 ├── signals/                 # 信号检测 + 评分
-├── recommendation/          # 推荐管线 + 解释
-├── reporting/               # 控制台 + HTML报告
-├── backtesting/             # 回测引擎
-├── scripts/                 # 运维脚本
+├── recommendation/          # 推荐排序 + 解释
+├── reporting/               # 控制台 + HTML报告（Plotly图表）
+├── scripts/                 # 运维脚本（回填 + 每日更新）
 └── tests/                   # 测试（纯合成数据）
 ```
 
 ## 数据来源
 
-- **baostock**（主力）：无频率限制，稳定，前复权数据
-- **akshare**（备用）：东方财富数据源，有限流
+- **baostock**：无频率限制，稳定，前复权(qfq)数据
 
 ## 注意事项
 

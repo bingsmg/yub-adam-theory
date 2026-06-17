@@ -1,0 +1,12 @@
+2026-06-14 23:48:54.842 | INFO     | utils.logger:setup_logging:37 | Logging configured — level=INFO
+2026-06-14 23:49:27.571 | INFO     | utils.logger:setup_logging:37 | Logging configured — level=INFO
+2026-06-14 23:49:27.572 | INFO     | __main__:main:43 | ============================================================
+2026-06-14 23:49:27.572 | INFO     | __main__:main:44 | Adam's Theory — Consolidated Data Backfill
+2026-06-14 23:49:27.572 | INFO     | __main__:main:45 | Period: 2024-06-14 → 2026-06-14
+2026-06-14 23:49:27.572 | INFO     | __main__:main:46 | ============================================================
+2026-06-14 23:49:27.572 | INFO     | __main__:main:49 | Fetching full stock list via baostock...
+2026-06-14 23:49:58.701 | INFO     | utils.logger:setup_logging:37 | Logging configured — level=INFO
+2026-06-14 23:50:06.315 | INFO     | data.sources.baostock_source:get_stock_list:101 | baostock: 5207 listed stocks
+2026-06-14 23:50:08.079 | INFO     | __main__:main:51 | Total stocks: 5207
+2026-06-14 23:50:09.081 | INFO     | data.sources.strategy:select_source:79 | Selected data source: baostock (priority strategy)
+2026-06-14 23:50:09.082 | INFO     | data.consolidated_store:build_all_stocks_parquet:126 | Building: 5207 stocks to fetch via baostock, 2024-06-14 → 2026-06-14

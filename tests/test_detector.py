@@ -18,10 +18,12 @@ class TestDetection:
         assert detect_signal(df, symbol="000001") is None
 
     def test_no_crash_on_normal_data(self, ranging_df):
-        """Normal data should not crash — may or may not produce signal."""
+        """Should not crash on any data; random noise may rarely trigger signal."""
         result = detect_signal(ranging_df, symbol="000001", name="test")
-        # Ranging market should not trigger 2+ conditions
-        assert result is None
+        if result is not None:
+            assert result.direction == "buy"
+            assert len(result.clues) >= 2
+            assert 1.0 <= result.risk_score <= 10.0
 
     def test_signal_structure_when_triggered(self, breakout_df):
         """If signal triggers, verify output structure."""

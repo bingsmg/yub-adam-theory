@@ -32,9 +32,8 @@ from data.consolidated_store import (
     update_latest_days,
     filter_active_stocks,
 )
-from data.store import ParquetStore
 from signals.detector import detect_signal
-from recommendation.explainer import build_explanation, brief_reason
+from recommendation.explainer import build_explanation
 from recommendation.ranking import select_top_recommendations
 from reporting.console import print_recommendations
 from reporting.html_report import generate_html_report
@@ -78,7 +77,6 @@ def main():
     logger.info(f"Active candidates for analysis: {len(candidates)}")
 
     # 3. Run Adam's Theory detection
-    store = ParquetStore()
     signals = []
 
     latest_date = master['date'].max()

@@ -45,13 +45,6 @@ def main():
     logger.info(f"Period: {args.start} → {end_date}")
     logger.info("=" * 60)
 
-    # Check existing
-    parquet_path = settings.ALL_STOCKS_PATH
-    if parquet_path.exists() and not args.force:
-        logger.info(f"Found existing data: {parquet_path}")
-        logger.info("Use --force to redownload, or run daily_update.py to increment.")
-        return
-
     # 1. Get stock list
     logger.info("Fetching full stock list via baostock...")
     stock_list = get_stock_list_baostock()
@@ -68,7 +61,7 @@ def main():
         end_date=end_date,
     )
 
-    logger.info(f"Done! {count} stocks saved to {parquet_path}")
+    logger.info(f"Done! {count} stocks saved to {settings.ALL_STOCKS_PATH}")
 
 
 if __name__ == "__main__":

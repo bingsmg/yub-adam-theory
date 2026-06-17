@@ -8,20 +8,14 @@ class AdamSettings(BaseSettings):
     """Global configuration for Adam's Theory stock picker."""
 
     # --- Data paths ---
-    DATA_DIR: Path = Path("output/parquet")
     RESULTS_DIR: Path = Path("output/results")
     REPORTS_DIR: Path = Path("output/reports")
-    ALL_STOCKS_PATH: Path = Path("output/all_stocks.parquet")  # Consolidated single-file store
+    ALL_STOCKS_PATH: Path = Path("output/all_stocks.parquet")  # Consolidated single-file store (legacy backup)
+    DAILY_DIR: Path = Path("output/daily")                     # Date-partitioned parquet files
     STOCK_LIST_PATH: Path = Path("output/stock_list.csv")      # Stock universe cache
 
     # --- Adam's Theory core parameters ---
     LOOKBACK_BARS: int = 20          # Center symmetry projection lookback window
-    ADX_THRESHOLD: float = 25.0      # Minimum ADX for strong trend confirmation
-    ADX_WEAK_THRESHOLD: float = 20.0 # Minimum ADX for weak trend (needs 2+ clues)
-    ER_MIN: float = 0.3              # Minimum Efficiency Ratio for valid trend
-    ER_PERIOD: int = 20              # Period for Efficiency Ratio calculation
-    ADX_PERIOD: int = 14             # ADX calculation period
-    ATR_PERIOD: int = 14             # ATR calculation period
 
     # --- Detection thresholds ---
     BREAKOUT_LOOKBACK: int = 20      # Bars to consider for breakout high
@@ -35,23 +29,38 @@ class AdamSettings(BaseSettings):
     MIN_PRICE: float = 3.0           # Exclude penny stocks below this price (RMB)
     MIN_VOLUME_RATIO: float = 0.3    # Minimum 5-day volume ratio for liquidity
     MIN_LISTING_DAYS: int = 60       # Stock must have at least this many trading days
-    MAX_STOCKS_TO_ANALYZE: int = 200 # Pre-screen to top N candidates for deep analysis
+    MAX_STOCKS_TO_ANALYZE: int = 5000  # Pre-screen to top N candidates (5000 = effectively all)
+
+    # --- Board permissions ---
+    # Set to True if you have trading permission for these boards.
+    # Chinese A-share board prefix mapping:
+    #   Main (default): 600-603,605, 000-003     — always allowed
+    #   创业板 ChiNext: 300, 301                   — requires separate permission
+    #   科创板 STAR Market: 688, 689               — requires separate permission
+    #   北交所 BSE: 8xxxxx, 4xxxxx                 — requires separate permission
+    ALLOW_CHINEXT: bool = True        # 创业板 (300/301xxx)
+    ALLOW_STAR_MARKET: bool = True    # 科创板 (688/689xxx)
+    ALLOW_BSE: bool = False           # 北交所 (8/4xxxxx) — usually excluded
 
     # --- Risk management ---
     MAX_RISK_SCORE: float = 7.0      # Max acceptable risk score (1-10 scale)
-    STOP_LOSS_ATR_MULTIPLE: float = 2.0  # Stop = entry - N * ATR
 
-    # --- API / Rate limiting ---
-    AKSHARE_DELAY_MIN: float = 0.5   # Minimum seconds between akshare API calls
-    AKSHARE_DELAY_MAX: float = 2.0   # Maximum seconds
-    PARALLEL_WORKERS: int = 4        # Maximum concurrent fetch workers
+    # --- Data source selection ---
+    # Source priority order: first available wins when strategy is "priority".
+    # Built-in sources: "akshare", "baostock", "efinance"
+    DATA_SOURCE_ORDER: list[str] = ["baostock", "akshare"]  # baostock primary — akshare unstable (EastMoney blocks)
+    DATA_SOURCE_STRATEGY: str = "priority"      # "priority" | "fastest_first"
+
+    # --- Data fetching parameters ---
+    FETCH_DELAY_SECONDS: float = 1.0   # Min delay between sequential requests
+    FETCH_MAX_WORKERS: int = 8         # Thread pool size for parallel fetch
+    FETCH_RETRY_COUNT: int = 3         # Max retries per stock
+
+    # --- Feishu notification ---
+    FEISHU_WEBHOOK_URL: str = ""     # Feishu bot webhook URL for daily push
 
     # --- Reporting ---
     TOP_N_RECOMMENDATIONS: int = 20  # Number of recommendations to output
-
-    # --- Backtesting ---
-    BACKTEST_START: str = "2023-01-01"
-    BACKTEST_END: str = "2024-12-31"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "case_sensitive": False}
 
@@ -62,5 +71,5 @@ settings = AdamSettings()
 
 def ensure_dirs() -> None:
     """Create output directories if they don't exist."""
-    for d in [settings.DATA_DIR, settings.RESULTS_DIR, settings.REPORTS_DIR]:
+    for d in [settings.RESULTS_DIR, settings.REPORTS_DIR, settings.DAILY_DIR]:
         d.mkdir(parents=True, exist_ok=True)

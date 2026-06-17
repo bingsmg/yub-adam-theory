@@ -8,33 +8,6 @@ from typing import Literal
 from pydantic import BaseModel
 
 
-# ── Raw data ──────────────────────────────────────────────────────────
-
-class OHLCVBar(BaseModel):
-    """A single bar of daily OHLCV data."""
-    date: datetime
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float       # shares (手)
-    amount: float        # turnover in RMB
-    symbol: str = ""
-    name: str = ""
-
-
-class StockMeta(BaseModel):
-    """Metadata for one stock in the universe."""
-    symbol: str          # 6-digit code without exchange suffix
-    name: str            # Chinese name
-    exchange: str        # "SH" | "SZ" | "BJ"
-    market_cap: float | None = None  # Total market cap in RMB
-    listing_date: datetime | None = None
-    last_updated: datetime | None = None
-    data_start_date: datetime | None = None
-    total_bars: int = 0
-
-
 # ── Indicator outputs ─────────────────────────────────────────────────
 
 class AdamProjection(BaseModel):
@@ -51,16 +24,6 @@ class SignalClue(BaseModel):
     clue_type: Literal["breakout", "trend_change", "range_expansion"]
     strength: float                     # 0.0 → 1.0
     detail: str                         # Human-readable explanation
-
-
-class MarketRegime(BaseModel):
-    """Overall market condition assessment."""
-    adx: float
-    plus_di: float
-    minus_di: float
-    atr: float
-    efficiency_ratio: float
-    trend_strength: Literal["strong", "weak", "none"]
 
 
 # ── Signal outputs ────────────────────────────────────────────────────
@@ -106,29 +69,3 @@ class DailyRecommendation(BaseModel):
     market_regime_desc: str = ""        # e.g. "trending", "ranging"
 
 
-# ── Backtest types ────────────────────────────────────────────────────
-
-class TradeRecord(BaseModel):
-    """A single completed trade for backtesting."""
-    symbol: str
-    name: str
-    entry_date: datetime
-    entry_price: float
-    exit_date: datetime
-    exit_price: float
-    exit_reason: Literal["stop_loss", "trailing_stop", "time_exit", "signal_reverse"]
-    pnl_pct: float                      # Percentage P&L
-    holding_days: int
-
-
-class BacktestResult(BaseModel):
-    """Full backtest performance summary."""
-    total_trades: int
-    win_rate: float                     # 0.0 → 1.0
-    avg_win_pct: float
-    avg_loss_pct: float
-    profit_factor: float                # gross_profit / gross_loss
-    sharpe_ratio: float                 # annualized
-    max_drawdown_pct: float
-    total_return_pct: float
-    trades: list[TradeRecord]
