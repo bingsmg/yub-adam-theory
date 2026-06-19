@@ -14,15 +14,52 @@ Signal: >= 2 of the 3 conditions must be satisfied simultaneously.
 
 Also implements the center symmetry projection (second mirror image)
 as a visual aid for the "one question" rule.
+
+── Condition Registry ──
+
+Custom conditions can be registered dynamically via register_condition().
+Each condition is a callable (df: pd.DataFrame) -> SignalClue | None.
+Built-in conditions are auto-registered on import.
 """
 
 from __future__ import annotations
+
+from typing import Callable
 
 import numpy as np
 import pandas as pd
 
 from config.schema import AdamProjection, SignalClue
 from config.settings import settings
+
+
+# ── Condition detector registry ───────────────────────────────────────────
+# Each entry: Callable[[pd.DataFrame], SignalClue | None]
+# Built-in conditions register themselves below; external code can
+# call register_condition() to add custom detectors.
+
+_CONDITION_REGISTRY: dict[str, Callable[[pd.DataFrame], SignalClue | None]] = {}
+
+
+def register_condition(name: str, detector: Callable[[pd.DataFrame], SignalClue | None]) -> None:
+    """Register a custom Adam's Theory condition detector.
+
+    Args:
+        name: Unique condition name (e.g. "my_custom_breakout").
+        detector: Callable that takes an OHLCV DataFrame and returns
+                  a SignalClue if the condition is met, or None otherwise.
+    """
+    _CONDITION_REGISTRY[name] = detector
+
+
+def unregister_condition(name: str) -> None:
+    """Remove a condition from the registry."""
+    _CONDITION_REGISTRY.pop(name, None)
+
+
+def list_registered_conditions() -> list[str]:
+    """Return names of all registered conditions."""
+    return list(_CONDITION_REGISTRY.keys())
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -335,24 +372,22 @@ def detect_gap_or_wide_range(
 
 def detect_all_three_conditions(df: pd.DataFrame) -> list[SignalClue]:
     """
-    Run all three condition detectors.
+    Run all registered condition detectors against the DataFrame.
 
-    Returns list of triggered conditions (0-3 elements).
+    Returns list of triggered conditions (0-N elements).
+    By default runs the 3 built-in conditions. Custom conditions
+    registered via register_condition() are included automatically.
     """
     clues: list[SignalClue] = []
-
-    c1 = detect_breakout(df)
-    if c1:
-        clues.append(c1)
-
-    c2 = detect_trend_change(df)
-    if c2:
-        clues.append(c2)
-
-    c3 = detect_gap_or_wide_range(df)
-    if c3:
-        clues.append(c3)
-
+    for detector in _CONDITION_REGISTRY.values():
+        try:
+            result = detector(df)
+            if result is not None:
+                clues.append(result)
+        except Exception:
+            # Silently skip detectors that fail — a custom condition
+            # shouldn't break the entire pipeline
+            continue
     return clues
 
 
@@ -403,3 +438,13 @@ def find_structural_stop(df: pd.DataFrame, lookback: int = 40) -> float:
         swing_low = current_close * 0.97
 
     return round(swing_low, 2)
+
+
+# ── Auto-register built-in conditions ─────────────────────────────────────
+# These are the three classical Adam's Theory entry conditions.
+# They register on import; external code can add custom conditions
+# via register_condition() or remove defaults via unregister_condition().
+
+register_condition("breakout", detect_breakout)
+register_condition("trend_change", detect_trend_change)
+register_condition("range_expansion", detect_gap_or_wide_range)

@@ -11,7 +11,8 @@ class AdamSettings(BaseSettings):
     RESULTS_DIR: Path = Path("output/results")
     REPORTS_DIR: Path = Path("output/reports")
     ALL_STOCKS_PATH: Path = Path("output/all_stocks.parquet")  # Consolidated single-file store (legacy backup)
-    DAILY_DIR: Path = Path("output/daily")                     # Date-partitioned parquet files
+    DAILY_DIR: Path = Path("output/daily")                     # Date-partitioned parquet files (legacy)
+    STOCKS_DIR: Path = Path("output/stocks")                   # Stock-partitioned parquet files (primary)
     STOCK_LIST_PATH: Path = Path("output/stock_list.csv")      # Stock universe cache
 
     # --- Adam's Theory core parameters ---
@@ -61,6 +62,19 @@ class AdamSettings(BaseSettings):
     # --- Feishu notification ---
     FEISHU_WEBHOOK_URL: str = ""     # Feishu bot webhook URL for daily push
 
+    # --- Scoring ---
+    # Weights for compute_quality_score: [condition_count, projection, volume]
+    SCORE_WEIGHTS: list[float] = [0.50, 0.30, 0.20]
+
+    # --- Ranking ---
+    # One-question rule: keep-N thresholds
+    RANK_KEEP_ALL_IF_LE: int = 5      # Keep all if <= this many signals
+    RANK_KEEP_FRAC_MID: float = 0.8   # Keep fraction when 6-15 signals
+    RANK_KEEP_FRAC_HIGH: float = 0.7  # Keep fraction when >15 signals
+    RANK_MID_THRESHOLD: int = 15      # Boundary between mid and high signal counts
+    RANK_MIN_KEEP_MID: int = 5        # Minimum keep when mid count
+    RANK_MIN_KEEP_HIGH: int = 10      # Minimum keep when high count
+
     # --- Reporting ---
     TOP_N_RECOMMENDATIONS: int = 20  # Number of recommendations to output
 
@@ -73,5 +87,5 @@ settings = AdamSettings()
 
 def ensure_dirs() -> None:
     """Create output directories if they don't exist."""
-    for d in [settings.RESULTS_DIR, settings.REPORTS_DIR, settings.DAILY_DIR]:
+    for d in [settings.RESULTS_DIR, settings.REPORTS_DIR, settings.DAILY_DIR, settings.STOCKS_DIR]:
         d.mkdir(parents=True, exist_ok=True)

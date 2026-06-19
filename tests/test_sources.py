@@ -301,7 +301,7 @@ class TestStrategy:
     def test_select_source_priority(self):
         src = select_source(strategy="priority")
         assert src is not None
-        assert src.name in ("akshare", "baostock", "efinance")
+        assert src.name in ("akshare", "baostock", "efinance", "tencent")
 
     def test_fetch_with_fallback_returns_first_success(self):
         """When first source succeeds, fallback is not tried."""

@@ -2,9 +2,11 @@
 Signal quality scoring — pure Adam's Theory criteria.
 
 Quality components:
-  - Condition count & strength (50%): 3 conditions > 2, higher strength = better
-  - Projection favorability (30%): up direction + convergence = better
-  - Volume confirmation (20%): higher relative volume = stronger conviction
+  - Condition count & strength: 3 conditions > 2, higher strength = better
+  - Projection favorability: up direction + convergence = better
+  - Volume confirmation: higher relative volume = stronger conviction
+
+Weights are configurable via settings.SCORE_WEIGHTS.
 """
 
 from __future__ import annotations
@@ -12,13 +14,15 @@ from __future__ import annotations
 import numpy as np
 
 from config.schema import AdamSignal
+from config.settings import settings
 
 
 def compute_quality_score(signal: AdamSignal) -> float:
     """Compute quality score 0-100 based on Adam's Theory factors."""
     clue_count = len(signal.clues)
+    w_cond, w_proj, w_vol = settings.SCORE_WEIGHTS
 
-    # ── Condition component (50%) ──
+    # ── Condition component ──
     if clue_count >= 3:
         avg_strength = float(np.mean([c.strength for c in signal.clues]))
         condition_score = 70 + 30 * avg_strength
@@ -28,7 +32,7 @@ def compute_quality_score(signal: AdamSignal) -> float:
     else:
         condition_score = 10
 
-    # ── Projection component (30%) ──
+    # ── Projection component ──
     proj = signal.projection
     if proj.projected_direction == "up":
         proj_score = 60 + 40 * proj.convergence_score
@@ -37,7 +41,7 @@ def compute_quality_score(signal: AdamSignal) -> float:
     else:
         proj_score = 10 + 20 * proj.convergence_score
 
-    # ── Volume component (20%) ──
+    # ── Volume component ──
     if signal.volume_ratio > 2.0:
         vol_score = 100
     elif signal.volume_ratio > 1.5:
@@ -49,7 +53,7 @@ def compute_quality_score(signal: AdamSignal) -> float:
     else:
         vol_score = 25
 
-    weights = [0.50, 0.30, 0.20]
+    weights = [w_cond, w_proj, w_vol]
     components = [condition_score, proj_score, vol_score]
     quality = sum(w * c for w, c in zip(weights, components))
 

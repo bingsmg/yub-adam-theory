@@ -10,6 +10,7 @@ venv/
 # Data outputs (large files, not for git)
 output/parquet/
 output/daily/
+output/stocks/
 output/results/
 output/reports/
 output/all_stocks.parquet

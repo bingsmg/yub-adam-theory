@@ -61,7 +61,7 @@ def main():
         end_date=end_date,
     )
 
-    logger.info(f"Done! {count} stocks saved to {settings.ALL_STOCKS_PATH}")
+    logger.info(f"Done! {count} stocks saved to {settings.STOCKS_DIR}")
 
 
 if __name__ == "__main__":

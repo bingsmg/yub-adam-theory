@@ -117,11 +117,7 @@ def detect_signal(
         direction="buy",
         projection=projection or _empty_projection(),
         clues=clues,
-        adx=0.0,            # Not used in gating
-        efficiency_ratio=0.0,  # Not used in gating
-        trend_strength="none",
         atr=round(current_atr, 2),
-        volatility_20d=0.0,
         risk_score=round(risk_score, 1),
         stop_loss_price=stop_loss,
         projected_entry_price=round(current_close, 2),

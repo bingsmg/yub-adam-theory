@@ -20,16 +20,17 @@ def apply_one_question_rule(signals: list[AdamSignal]) -> list[AdamSignal]:
     """
     Drop the weakest signals.
 
-    - <=5 signals: keep all
-    - 6-15: drop bottom 20%
-    - >15: drop bottom 30%
+    Thresholds are configurable via settings:
+    - <=RANK_KEEP_ALL_IF_LE signals: keep all
+    - RANK_KEEP_ALL_IF_LE+1 ~ RANK_MID_THRESHOLD: keep RANK_KEEP_FRAC_MID fraction
+    - >RANK_MID_THRESHOLD: keep RANK_KEEP_FRAC_HIGH fraction
     """
-    if len(signals) <= 5:
+    if len(signals) <= settings.RANK_KEEP_ALL_IF_LE:
         return signals
-    if len(signals) <= 15:
-        keep_n = max(5, int(len(signals) * 0.8))
+    if len(signals) <= settings.RANK_MID_THRESHOLD:
+        keep_n = max(settings.RANK_MIN_KEEP_MID, int(len(signals) * settings.RANK_KEEP_FRAC_MID))
     else:
-        keep_n = max(10, int(len(signals) * 0.7))
+        keep_n = max(settings.RANK_MIN_KEEP_HIGH, int(len(signals) * settings.RANK_KEEP_FRAC_HIGH))
 
     kept = signals[:keep_n]
     logger.info("One-question rule: kept {}/{} signals", len(kept), len(signals))

@@ -1,77 +1,117 @@
 #!/usr/bin/env python3
-"""Quick check: data coverage — are all stocks updated to latest trading day?"""
+"""Quick check: data coverage — are all stocks updated to latest trading day?
+
+Works with stock-partitioned files (output/stocks/*.parquet) primarily,
+falls back to date-partitioned files (output/daily/*.parquet) if needed.
+"""
+from __future__ import annotations
+
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import pandas as pd
+from data.consolidated_store import (
+    load_latest_snapshot,
+    load_all_stocks,
+    get_latest_date,
+    get_stale_stocks,
+)
+from config.settings import settings
 
-daily_dir = Path("output/daily")
-files = sorted(daily_dir.glob("*.parquet"))
 
-# Latest 5 date files
-print("=== Latest 5 date files ===")
-for f in files[-5:]:
-    df = pd.read_parquet(f)
-    print(f"  {f.stem}: {len(df):,} stocks")
+def main():
+    stocks_dir = settings.STOCKS_DIR
 
-# Latest file details
-latest_file = files[-1]
-df_latest = pd.read_parquet(latest_file)
-print(f"\n=== Latest date: {latest_file.stem} ===")
-print(f"  Total stocks: {len(df_latest):,}")
-print(f"  Price range: {df_latest['close'].min():.2f} ~ {df_latest['close'].max():.2f}")
-print(f"  Zero volume: {(df_latest['volume'] == 0).sum()}")
-print(f"  Null close: {df_latest['close'].isna().sum()}")
+    # 1. Overview
+    print("=== Stock-partitioned files ===")
+    if stocks_dir.exists():
+        stock_files = sorted(stocks_dir.glob("*.parquet"))
+        print(f"  Directory: {stocks_dir}")
+        print(f"  Total files: {len(stock_files)}")
+        if stock_files:
+            total_size = sum(f.stat().st_size for f in stock_files)
+            print(f"  Total size: {total_size/1e6:.1f} MB")
+            print(f"  Avg per stock: {total_size/len(stock_files)/1e3:.1f} KB")
+    else:
+        print(f"  {stocks_dir} does not exist yet. Run migrate_to_stock_files.py first.")
+        # Fallback: try daily dir
+        daily_dir = settings.DAILY_DIR
+        if daily_dir.exists():
+            files = sorted(daily_dir.glob("*.parquet"))
+            print(f"\n=== Legacy date-partitioned files ({daily_dir}) ===")
+            print(f"  Total files: {len(files)}")
+            if files:
+                total_size = sum(f.stat().st_size for f in files)
+                print(f"  Total size: {total_size/1e6:.1f} MB")
 
-# Per-date coverage
-print("\n=== Last 5 days per-date counts ===")
-all_syms = set()
-for f in files[-5:]:
-    df = pd.read_parquet(f)
-    syms = set(df["symbol"].unique())
-    all_syms.update(syms)
-    print(f"  {f.stem}: {len(syms):,} stocks")
-print(f"  Unique across all 5: {len(all_syms):,}")
+    # 2. Latest snapshot stats
+    print("\n=== Latest snapshot ===")
+    snapshot = load_latest_snapshot()
+    if not snapshot.empty:
+        latest_date = snapshot['date'].max()
+        print(f"  Latest date: {latest_date.date()}")
+        print(f"  Stocks in snapshot: {len(snapshot):,}")
+        print(f"  Price range: {snapshot['close'].min():.2f} ~ {snapshot['close'].max():.2f}")
+        print(f"  Zero volume: {(snapshot['volume'] == 0).sum():,}")
+        print(f"  Null close: {snapshot['close'].isna().sum():,}")
+        print(f"  Names available: {snapshot['name'].notna().sum():,}")
+    else:
+        print("  NO DATA")
 
-# Full range
-print(f"\n=== Full data range ===")
-print(f"  First: {files[0].stem}, Last: {files[-1].stem}")
-print(f"  Total date files: {len(files)}")
+    # 3. Per-stock latest date check
+    print("\n=== Per-stock staleness ===")
+    try:
+        df_all = load_all_stocks()
+        if not df_all.empty:
+            latest_per_sym = df_all.groupby('symbol')['date'].max()
+            date_counts = latest_per_sym.value_counts().sort_index()
+            print(f"  Total unique symbols: {len(latest_per_sym):,}")
+            print(f"  Latest dates (last 10):")
+            for d, c in date_counts.tail(10).items():
+                print(f"    {d.date()}: {c:,} stocks")
 
-# Load all and check per-symbol latest date
-print("\n=== Per-symbol latest date ===")
-df_all = pd.read_parquet(daily_dir)
-df_all["date"] = pd.to_datetime(df_all["date"])
-latest_per_sym = df_all.groupby("symbol")["date"].max()
-print(f"  Total unique symbols: {len(latest_per_sym):,}")
+            # Show oldest 10
+            print(f"  Oldest dates (first 10):")
+            for d, c in date_counts.head(10).items():
+                print(f"    {d.date()}: {c:,} stocks")
+    except Exception as e:
+        print(f"  Error: {e}")
 
-date_counts = latest_per_sym.value_counts().sort_index()
-print(f"  Latest dates (bottom 10):")
-for d, c in date_counts.tail(10).items():
-    flag = " <<<" if d != pd.Timestamp("2026-06-11") else ""
-    print(f"    {d.date()}: {c:,} stocks{flag}")
+    # 4. Filter simulation
+    print("\n=== Pre-screen filter results (latest date) ===")
+    if not snapshot.empty:
+        latest = snapshot.copy()
+        total_before = len(latest)
 
-latest_date = pd.Timestamp("2026-06-11")
-not_latest = (latest_per_sym < latest_date).sum()
-print(f"\n  NOT updated to 2026-06-11: {not_latest:,} / {len(latest_per_sym):,}")
+        if 'name' in latest.columns:
+            latest = latest[~latest['name'].str.contains('ST|退', na=False)]
+        latest = latest[latest['close'] >= 3.0]
+        latest = latest[latest['volume'] > 0]
+        latest = latest[~latest['symbol'].astype(str).str.match(r'^[84]')]
 
-if not_latest > 0:
-    stale = latest_per_sym[latest_per_sym < latest_date].sort_values()
-    print(f"\n  Stale stocks (oldest first):")
-    for sym, d in stale.head(20).items():
-        rows = df_all[df_all["symbol"] == sym]
-        name = rows["name"].iloc[0] if len(rows) > 0 else "?"
-        print(f"    {sym} ({name}): last = {d.date()}")
+        after = len(latest)
+        print(f"  All stocks on latest date: {total_before:,}")
+        print(f"  After filters (no ST, price>=3, vol>0, no BSE): {after:,}")
+        if not latest.empty:
+            latest['_score'] = latest['volume'] * latest['close']
+            print(f"  Activity range: {latest['_score'].min():.0f} ~ {latest['_score'].max():.0f}")
 
-# Filter: how many pass the pre-screen?
-print(f"\n=== Pre-screen filter results (latest date) ===")
-ld = df_all[df_all["date"] == latest_date].copy()
-print(f"  All stocks on {latest_date.date()}: {len(ld):,}")
+    # 5. Top 5 most active by volume*close
+    print("\n=== Top 5 most active stocks ===")
+    try:
+        if not snapshot.empty:
+            snap = snapshot.copy()
+            snap['_score'] = snap['volume'].fillna(0) * snap['close'].fillna(0)
+            top5 = snap.nlargest(5, '_score')
+            for _, row in top5.iterrows():
+                print(f"  {row['symbol']} ({row.get('name', '?')}): "
+                      f"close={row['close']:.2f}, vol={row['volume']:.0f}, "
+                      f"score={row['_score']:.0f}")
+    except Exception:
+        pass
 
-# Apply same filters as filter_active_stocks
-if "name" in ld.columns:
-    ld = ld[~ld["name"].str.contains("ST|退", na=False)]
-ld = ld[ld["close"] >= 3.0]
-ld = ld[ld["volume"] > 0]
-ld = ld[~ld["symbol"].astype(str).str.match(r"^[84]")]  # Exclude BSE
-print(f"  After filters (no ST, price>=3, vol>0, no BSE): {len(ld):,}")
-print(f"  Activity range: {ld['volume'].min()*ld['close'].min():.0f} ~ "
-      f"{ld['volume'].max()*ld['close'].max():.0f}")
+
+if __name__ == "__main__":
+    main()

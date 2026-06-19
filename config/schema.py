@@ -38,13 +38,9 @@ class AdamSignal(BaseModel):
     # Core calculations
     projection: AdamProjection
     clues: list[SignalClue]
-    adx: float
-    efficiency_ratio: float
-    trend_strength: Literal["strong", "weak", "none"]
 
     # Risk
     atr: float
-    volatility_20d: float
     risk_score: float                   # 1 (safest) → 10 (riskiest)
     stop_loss_price: float
     projected_entry_price: float
@@ -65,7 +61,6 @@ class DailyRecommendation(BaseModel):
     total_stocks_analyzed: int
     total_signals_found: int
     recommendations: list[AdamSignal]
-    index_adx: float | None = None      # CSI 300 ADX
     market_regime_desc: str = ""        # e.g. "trending", "ranging"
 
 
