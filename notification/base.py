@@ -1,9 +1,8 @@
 """
-Notification channel abstract base class.
+通知通道抽象基类。
 
-Implement this to add new notification channels (e.g. DingTalk,
-WeChat Work, email, SMS). Each notifier receives the full
-DailyRecommendation and returns success/failure.
+实现此类以添加新的通知通道（如钉钉、企业微信、邮件、短信）。
+每个通知器接收完整的 DailyRecommendation 并返回成功/失败。
 """
 
 from __future__ import annotations
@@ -14,18 +13,18 @@ from config.schema import DailyRecommendation
 
 
 class Notifier(ABC):
-    """Abstract base for notification channels.
+    """通知通道抽象基类。
 
-    Subclass and implement send() to add a new channel.
+    子类化并实现 send() 以添加新通道。
     """
 
     name: str = "base"
 
     @abstractmethod
     def send(self, recommendation: DailyRecommendation) -> bool:
-        """Send a daily recommendation via this channel.
+        """通过此通道发送每日推荐。
 
-        Returns True on success, False on failure.
+        成功返回 True，失败返回 False。
         """
         ...
 

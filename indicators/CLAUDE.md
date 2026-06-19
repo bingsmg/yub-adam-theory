@@ -4,6 +4,32 @@
 
 纯亚当理论（Adam's Theory of Markets）的数学实现。无任何技术指标（ADX/RSI/MACD），仅基于价格行为的三种视觉条件。
 
+## 模块
+
+| 文件 | 用途 |
+|------|------|
+| `adams_theory.py` | 核心算法：投影、三条件检测、门控、结构止损 |
+| `market_regime.py` | 市场体制检测：趋势/震荡/高波动分类 + 风险调整 |
+| `__init__.py` | 公共 API 导出 |
+
+## 市场体制检测 `market_regime.py`
+
+基于纯价格行为的市场环境分类：
+
+```python
+from indicators.market_regime import detect_market_regime, describe_market_regime, regime_risk_adjustment
+
+regime = detect_market_regime(df)         # → "trending_up" | "trending_down" | "ranging" | "volatile"
+desc = describe_market_regime(regime)     # → 中文描述
+adj = regime_risk_adjustment(regime)      # → 风险调整倍数
+```
+
+算法：通过净价格变化判断趋势方向，ATR/收盘价比率判断波动性，价格区间宽度判断盘整。
+- `trending_up`: 价格单调上升 >5%，顺势建议
+- `trending_down`: 价格单调下降 >5%，逆势风险
+- `ranging`: 价格区间 <3%，突破信号更有价值
+- `volatile`: ATR/价格 >4%，建议严格止损
+
 ## 核心算法
 
 ### 1. 中心对称投影 `compute_center_symmetry_projection()`

@@ -14,7 +14,7 @@ Adam's Theory A-Share stock recommendation system. Uses a pluggable multi-source
 # Activate the venv (always needed first)
 cd E:/Projects/ClaudeCodeProjects/yd-project && source .venv/Scripts/activate
 
-# Run all tests (18 tests, synthetic data only)
+# Run all tests (60+ tests, synthetic data only, deterministic seed)
 python -m pytest tests/ -v
 
 # ── Daily workflow ──────────────────────────────────────────────
@@ -80,6 +80,7 @@ No ADX, no Efficiency Ratio, no indicator gating — pure price action per Wilde
 | `data/sources/` | Pluggable data source layer. `base.py` (ABC), `baostock_source.py`, `akshare_source.py`, `ef_source.py` (stub), `strategy.py` (selection), `parallel.py` (ThreadPoolExecutor batch). Configurable via `DATA_SOURCE_ORDER` and `DATA_SOURCE_STRATEGY` in settings. |
 | `data/consolidated_store.py` | Date-partitioned Parquet store. `build_all_stocks_parquet()`, `update_latest_days()`, `filter_active_stocks()`, `get_board()`, `migrate_to_daily()`. Now delegates fetching to `data/sources/` — uses parallel fetch by default. |
 | `indicators/adams_theory.py` | Core: `compute_center_symmetry_projection()`, `detect_breakout()`, `detect_trend_change()`, `detect_gap_or_wide_range()`, `check_buy_signal()`, `find_structural_stop()` |
+| `indicators/market_regime.py` | Market regime: `detect_market_regime()` → trending_up/down/ranging/volatile, `describe_market_regime()`, `regime_risk_adjustment()` |
 | `signals/detector.py` | `detect_signal(df, symbol)` — runs all 3 conditions, requires >=2, builds AdamSignal |
 | `signals/scorer.py` | `compute_quality_score()` (0-100), `rank_signals()` |
 | `recommendation/ranking.py` | `select_top_recommendations()` — quality^2 / risk ranking + "one question" rule |
@@ -131,9 +132,9 @@ Filtering happens in `filter_active_stocks()` — the pre-screen gate, before an
 
 ## Testing conventions
 
-- Tests use **synthetic OHLCV DataFrames** from `tests/conftest.py`. Never call real APIs.
+- Tests use **synthetic OHLCV DataFrames** from `tests/conftest.py` with **fixed random seed** (deterministic). Never call real APIs.
 - All fixtures: `[open, high, low, close, volume]` columns, DatetimeIndex.
-- 18 tests: projection, breakout, trend change, gap/wide range, combined detection (>=2 gate), structural stop, detector integration.
+- 60+ tests: projection, breakout, trend change, gap/wide range, combined detection (>=2 gate), structural stop, detector integration, data source layer (normalization, ABC, mock sources, strategy, parallel, factory), storage I/O (load/save/snapshot/bulk), filters (board/permissions/activity), quality scoring, ranking (one-question rule), notification (card building, HTTP mock, ABC).
 
 ## Known issues
 

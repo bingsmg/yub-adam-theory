@@ -23,6 +23,46 @@ from signals.detector import detect_signal
 from signals.scorer import rank_signals
 from recommendation.ranking import select_top_recommendations
 from recommendation.explainer import build_explanation
+from indicators.market_regime import detect_market_regime, describe_market_regime
+
+
+def _build_market_proxy(master: pd.DataFrame) -> pd.DataFrame | None:
+    """Build a synthetic market proxy DataFrame from all stocks' data.
+
+    Groups by date and computes equal-weighted average OHLCV across all stocks
+    to create a single "market" time series for regime detection.
+
+    Args:
+        master: Full DataFrame from load_all_stocks() with columns:
+            date, open, high, low, close, volume, symbol.
+
+    Returns:
+        DataFrame with date index and ohlcv columns, or None if insufficient data.
+    """
+    if master is None or master.empty:
+        return None
+    if "date" not in master.columns:
+        return None
+
+    required = ["open", "high", "low", "close", "volume"]
+    if not all(c in master.columns for c in required):
+        return None
+
+    try:
+        grouped = master.groupby("date")
+        proxy = pd.DataFrame({
+            "open": grouped["open"].mean(),
+            "high": grouped["high"].mean(),
+            "low": grouped["low"].mean(),
+            "close": grouped["close"].mean(),
+            "volume": grouped["volume"].mean(),
+        })
+        proxy = proxy.sort_index()
+        if len(proxy) < 20:
+            return None
+        return proxy
+    except Exception:
+        return None
 
 
 class DailyPipeline:
@@ -186,14 +226,32 @@ class DailyPipeline:
         # 5. Save CSV
         self.save_csv(recommendations, latest_str)
 
-        # 6. Build result
+        # 6. Detect market regime
+        try:
+            # Use a broad-market proxy: average of all candidate stocks' latest data
+            regime = "ranging"  # Default
+            regime_desc = describe_market_regime(regime)
+            # If we have a master DataFrame, compute regime on the aggregate
+            sample_close = master["close"] if "close" in master.columns else None
+            if sample_close is not None and len(sample_close) > 0:
+                # Build a synthetic "market" OHLCV from all stocks' latest snapshot
+                market_df = _build_market_proxy(master)
+                if market_df is not None and len(market_df) >= 20:
+                    regime = detect_market_regime(market_df)
+                    regime_desc = describe_market_regime(regime)
+            logger.info(f"Market regime: {regime} — {regime_desc}")
+        except Exception:
+            regime_desc = "震荡盘整 — 无法判定市场体制"
+            logger.warning("Could not detect market regime, using default")
+
+        # 7. Build result
         result = DailyRecommendation(
             generated_at=datetime.now(),
             market_date=datetime.strptime(latest_str, '%Y-%m-%d') if latest_str else datetime.now(),
             total_stocks_analyzed=len(candidates),
             total_signals_found=len(signals),
             recommendations=recommendations,
-            market_regime_desc="",
+            market_regime_desc=regime_desc,
         )
 
         n = len(recommendations)

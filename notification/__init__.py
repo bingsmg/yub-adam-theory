@@ -14,11 +14,12 @@ Usage:
 from __future__ import annotations
 
 from notification.base import Notifier
-from notification.feishu import FeishuNotifier, build_feishu_card, build_feishu_text
+from notification.feishu import FeishuNotifier, build_feishu_card, build_feishu_card_from_rows, build_feishu_text
 
 __all__ = [
     "Notifier",
     "FeishuNotifier",
     "build_feishu_card",
+    "build_feishu_card_from_rows",
     "build_feishu_text",
 ]

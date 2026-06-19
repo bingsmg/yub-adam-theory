@@ -59,6 +59,7 @@ def main():
         stock_list=stock_list,
         start_date=args.start,
         end_date=end_date,
+        force=args.force,
     )
 
     logger.info(f"Done! {count} stocks saved to {settings.STOCKS_DIR}")

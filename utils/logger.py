@@ -1,4 +1,4 @@
-"""Structured logging via loguru."""
+"""通过 loguru 实现结构化日志。"""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ from loguru import logger
 
 
 def setup_logging(log_dir: str | Path = "output", level: str = "INFO") -> None:
-    """Configure loguru with console + file sinks."""
+    """配置 loguru 的控制台和文件输出。"""
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Remove default handler
+    # 移除默认处理器
     logger.remove()
 
-    # Console — compact format
+    # 控制台 — 紧凑格式
     logger.add(
         sys.stderr,
         format="<level>{level: <8}</level> | <cyan>{time:HH:mm:ss}</cyan> | <level>{message}</level>",
@@ -24,7 +24,7 @@ def setup_logging(log_dir: str | Path = "output", level: str = "INFO") -> None:
         colorize=True,
     )
 
-    # File — detailed format with rotation
+    # 文件 — 详细格式，自动轮转
     logger.add(
         log_dir / "stock_picker_{time:YYYY-MM-DD}.log",
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message}",
@@ -37,5 +37,5 @@ def setup_logging(log_dir: str | Path = "output", level: str = "INFO") -> None:
     logger.info("Logging configured — level={}", level)
 
 
-# Convenience re-export
+# 便捷再导出
 __all__ = ["logger", "setup_logging"]

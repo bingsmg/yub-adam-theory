@@ -26,10 +26,10 @@ class TestDetection:
             assert 1.0 <= result.risk_score <= 10.0
 
     def test_signal_structure_when_triggered(self, breakout_df):
-        """If signal triggers, verify output structure."""
+        """Breakout fixture always triggers a signal with >=2 conditions."""
         result = detect_signal(breakout_df, symbol="000001", name="test")
-        if result is not None:
-            assert result.direction == "buy"
-            assert len(result.clues) >= 2  # Must have >=2
-            assert result.stop_loss_price < result.current_close
-            assert 1.0 <= result.risk_score <= 10.0
+        assert result is not None, "Breakout fixture should trigger a buy signal"
+        assert result.direction == "buy"
+        assert len(result.clues) >= 2  # Must have >=2
+        assert result.stop_loss_price < result.current_close
+        assert 1.0 <= result.risk_score <= 10.0

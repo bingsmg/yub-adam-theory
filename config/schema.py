@@ -1,4 +1,4 @@
-"""Pydantic data models for the stock recommendation pipeline."""
+"""股票推荐管线的 Pydantic 数据模型。"""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ from typing import Literal
 from pydantic import BaseModel
 
 
-# ── Indicator outputs ─────────────────────────────────────────────────
+# ── 指标输出 ───────────────────────────────────────────────────────────
 
 class AdamProjection(BaseModel):
-    """Result of the center symmetry (second mirror image) projection."""
+    """中心对称（第二镜像）投影结果。"""
     projected_prices: list[float]      # lookback_bars projected midpoints ahead
     anchor_price: float                 # (close + open) / 2 of the current bar
     convergence_score: float            # 0 (noisy) → 1 (tight convergence)
@@ -20,16 +20,16 @@ class AdamProjection(BaseModel):
 
 
 class SignalClue(BaseModel):
-    """One of the three Adam's Theory entry clues."""
+    """亚当理论三大入场线索之一。"""
     clue_type: Literal["breakout", "trend_change", "range_expansion"]
     strength: float                     # 0.0 → 1.0
     detail: str                         # Human-readable explanation
 
 
-# ── Signal outputs ────────────────────────────────────────────────────
+# ── 信号输出 ────────────────────────────────────────────────────────────
 
 class AdamSignal(BaseModel):
-    """Complete buy signal for one stock."""
+    """单只股票的完整买入信号。"""
     symbol: str
     name: str
     signal_date: datetime
@@ -55,7 +55,7 @@ class AdamSignal(BaseModel):
 
 
 class DailyRecommendation(BaseModel):
-    """Full daily recommendation output."""
+    """完整每日推荐输出。"""
     generated_at: datetime
     market_date: datetime
     total_stocks_analyzed: int

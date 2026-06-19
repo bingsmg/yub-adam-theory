@@ -35,13 +35,14 @@ class TestCenterSymmetryProjection:
 
 class TestBreakout:
     def test_breakout_detected(self, breakout_df):
+        """Deterministic fixture: always triggers breakout."""
         clue = detect_breakout(breakout_df)
-        assert clue is not None
+        assert clue is not None, "Breakout should be detected on this fixture"
         assert clue.clue_type == "breakout"
         assert clue.strength > 0
 
     def test_no_breakout_ranging(self, ranging_df):
-        """Ranging data should rarely trigger a strong breakout. If it does, verify structure."""
+        """Ranging data rarely triggers a breakout. Verify structure if it does."""
         clue = detect_breakout(ranging_df)
         if clue is not None:
             assert clue.clue_type == "breakout"
@@ -50,18 +51,20 @@ class TestBreakout:
 
 class TestTrendChange:
     def test_detected(self, trend_change_df):
+        """Deterministic fixture: always triggers trend change."""
         clue = detect_trend_change(trend_change_df)
-        if clue is not None:
-            assert clue.clue_type == "trend_change"
-            assert 0 < clue.strength <= 1.0
+        assert clue is not None, "Trend change should be detected on this fixture"
+        assert clue.clue_type == "trend_change"
+        assert 0 < clue.strength <= 1.0
 
 
 class TestGapWideRange:
     def test_detected(self, range_expansion_df):
+        """Deterministic fixture: always triggers range expansion."""
         clue = detect_gap_or_wide_range(range_expansion_df)
-        if clue is not None:
-            assert clue.clue_type == "range_expansion"
-            assert 0 < clue.strength <= 1.0
+        assert clue is not None, "Range expansion should be detected on this fixture"
+        assert clue.clue_type == "range_expansion"
+        assert 0 < clue.strength <= 1.0
 
     def test_not_triggered_normal(self, ranging_df):
         """Random data occasionally triggers — should never crash, type correct if it does."""

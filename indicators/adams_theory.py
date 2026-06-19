@@ -1,25 +1,25 @@
 """
-Adam's Theory of Markets — Core Algorithm.
+亚当理论（Adam's Theory）—— 核心算法。
 
-Pure Adam's Theory implementation per Wilder's original work.
-No technical indicators (ADX, RSI, etc.) in the gating logic —
-only the three visual clues from the chart.
+纯亚当理论实现，依据威尔德的原始著作。
+门控逻辑中不包含任何技术指标（ADX、RSI 等），
+仅使用图表中的三种视觉线索。
 
-Three Entry Conditions (Long):
-  1. Breakout — price breaks above visible recent highs
-  2. Trend Change — prior downtrend/consolidation reverses into uptrend
-  3. Gap / Wide Range — gap up or daily range significantly above average
+三个入场条件（多头）：
+  1. 突破 — 价格突破近期可见高点
+  2. 趋势改变 — 前期下降/盘整转为上升趋势
+  3. 缺口/宽幅 — 跳空高开或日线范围显著高于均值
 
-Signal: >= 2 of the 3 conditions must be satisfied simultaneously.
+信号：3 个条件中须同时满足 >= 2 个。
 
-Also implements the center symmetry projection (second mirror image)
-as a visual aid for the "one question" rule.
+同时实现了中心对称投影（第二镜像），
+作为"一个问题"规则的视觉辅助工具。
 
-── Condition Registry ──
+── 条件注册表 ──
 
-Custom conditions can be registered dynamically via register_condition().
-Each condition is a callable (df: pd.DataFrame) -> SignalClue | None.
-Built-in conditions are auto-registered on import.
+可通过 register_condition() 动态注册自定义条件。
+每个条件是一个可调用对象 (df: pd.DataFrame) -> SignalClue | None。
+内置条件在导入时自动注册。
 """
 
 from __future__ import annotations
@@ -33,37 +33,37 @@ from config.schema import AdamProjection, SignalClue
 from config.settings import settings
 
 
-# ── Condition detector registry ───────────────────────────────────────────
-# Each entry: Callable[[pd.DataFrame], SignalClue | None]
-# Built-in conditions register themselves below; external code can
-# call register_condition() to add custom detectors.
+# ── 条件探测器注册表 ─────────────────────────────────────────────────────
+# 每项：Callable[[pd.DataFrame], SignalClue | None]
+# 内置条件在下方自行注册；外部代码可调用
+# register_condition() 来添加自定义探测器。
 
 _CONDITION_REGISTRY: dict[str, Callable[[pd.DataFrame], SignalClue | None]] = {}
 
 
 def register_condition(name: str, detector: Callable[[pd.DataFrame], SignalClue | None]) -> None:
-    """Register a custom Adam's Theory condition detector.
+    """注册自定义亚当理论条件探测器。
 
-    Args:
-        name: Unique condition name (e.g. "my_custom_breakout").
-        detector: Callable that takes an OHLCV DataFrame and returns
-                  a SignalClue if the condition is met, or None otherwise.
+    参数:
+        name: 唯一条件名称（例如 "my_custom_breakout"）。
+        detector: 接受 OHLCV DataFrame 的可调用对象，条件满足时返回
+                  SignalClue，否则返回 None。
     """
     _CONDITION_REGISTRY[name] = detector
 
 
 def unregister_condition(name: str) -> None:
-    """Remove a condition from the registry."""
+    """从注册表中移除一个条件。"""
     _CONDITION_REGISTRY.pop(name, None)
 
 
 def list_registered_conditions() -> list[str]:
-    """Return names of all registered conditions."""
+    """返回所有已注册条件的名称列表。"""
     return list(_CONDITION_REGISTRY.keys())
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Center Symmetry Projection (the "second image")
+# 中心对称投影（"第二镜像"）
 # ═══════════════════════════════════════════════════════════════════════
 
 def compute_center_symmetry_projection(
@@ -71,21 +71,21 @@ def compute_center_symmetry_projection(
     lookback: int | None = None,
 ) -> AdamProjection:
     """
-    Adam's Theory center symmetry (second mirror image).
+    亚当理论中心对称投影（第二镜像）。
 
-    The trader traces past price on transparent film, flips it horizontally
-    then vertically, and aligns the oldest bar with "now". The resulting
-    curve is the market's own projection of where price is likely to go.
+    交易者将过去价格轨迹描在透明胶片上，先水平翻转再垂直翻转，
+    将最旧的 K 线与"当前"对齐，得到的曲线就是市场自身对
+    未来价格走势的投影。
 
-    Mathematical equivalent:
+    数学等价形式：
         Projected[i] = 2 * anchor - historical_midpoint[lookback - 1 - i]
 
-    Args:
-        df: OHLCV DataFrame. Most recent row = the "center point" (now).
-        lookback: Bars to mirror (default from settings).
+    参数:
+        df: OHLCV DataFrame。最近一行 = "中心点"（当前）。
+        lookback: 镜像的 K 线数量（默认来自配置）。
 
-    Returns:
-        AdamProjection with projected_midpoints, anchor, convergence, direction.
+    返回:
+        AdamProjection，包含 projected_midpoints、anchor、convergence、direction。
     """
     if lookback is None:
         lookback = settings.LOOKBACK_BARS
@@ -101,7 +101,7 @@ def compute_center_symmetry_projection(
     highs = df["high"].values.astype(float)
     lows = df["low"].values.astype(float)
 
-    # Historical segment: lookback bars before "now"
+    # 历史段：当前之前的 lookback 根 K 线
     hist_close = closes[-(lookback + 1):-1]
     hist_open = opens[-(lookback + 1):-1]
     hist_high = highs[-(lookback + 1):-1]
@@ -113,9 +113,9 @@ def compute_center_symmetry_projection(
     projected_lows = []
 
     for i in range(n):
-        hist_idx = n - 1 - i  # most recent past → earliest future
-        # Center symmetry: Proj = 2*Anchor - Hist
-        # High/Low invert: past high → projected low, past low → projected high
+        hist_idx = n - 1 - i  # 最近的历史 → 最早的未来
+        # 中心对称：Proj = 2*Anchor - Hist
+        # 高低点反转：过去高点 → 投影低点，过去低点 → 投影高点
         proj_mid = 2.0 * anchor - (hist_close[hist_idx] + hist_open[hist_idx]) / 2.0
         proj_high = 2.0 * anchor - hist_low[hist_idx]
         proj_low = 2.0 * anchor - hist_high[hist_idx]
@@ -124,7 +124,7 @@ def compute_center_symmetry_projection(
         projected_highs.append(float(proj_high))
         projected_lows.append(float(proj_low))
 
-    # Direction: compare first few projected bars to anchor
+    # 方向：比较前几根投影 K 线与锚点
     if len(projected_midpoints) >= 5:
         early = np.mean(projected_midpoints[:5])
         late = np.mean(projected_midpoints[-5:])
@@ -138,7 +138,7 @@ def compute_center_symmetry_projection(
     else:
         direction = "neutral"
 
-    # Convergence: how tightly the projection clusters
+    # 收敛度：投影序列的聚集紧密程度
     if projected_midpoints:
         std = float(np.std(projected_midpoints))
         convergence = float(1.0 / (1.0 + std / anchor))
@@ -156,7 +156,7 @@ def compute_center_symmetry_projection(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Condition 1: Breakout (突破)
+# 条件 1：突破
 # ═══════════════════════════════════════════════════════════════════════
 
 def detect_breakout(
@@ -164,11 +164,11 @@ def detect_breakout(
     lookback: int | None = None,
 ) -> SignalClue | None:
     """
-    Condition 1 — Breakout (突破):
-    Today's closing price breaks above the visible high of the recent period.
-    The longer the consolidation before the breakout, the more significant.
+    条件 1 — 突破：
+    今日收盘价突破近期可见高点。
+    突破前盘整越久，意义越重大。
 
-    Rule: close >= highest high of the last N bars (excluding today)
+    规则：close >= 过去 N 根 K 线（不含今日）的最高 high
     """
     if lookback is None:
         lookback = settings.BREAKOUT_LOOKBACK
@@ -176,7 +176,7 @@ def detect_breakout(
     if len(df) < lookback + 2:
         return None
 
-    recent = df.iloc[-(lookback + 1):-1]  # exclude today
+    recent = df.iloc[-(lookback + 1):-1]  # 排除今日
     current_close = float(df["close"].iloc[-1])
     highest_high = float(recent["high"].max())
     avg_high = float(recent["high"].mean())
@@ -184,13 +184,13 @@ def detect_breakout(
     if current_close < highest_high:
         return None
 
-    # How many of the lookback highs does this close exceed?
+    # 今日收盘价超过了多少根 lookback 内的高点
     bars_broken = int((df["close"].iloc[-1] > recent["high"]).sum())
     coverage_pct = bars_broken / lookback * 100
 
     excess_pct = (current_close - highest_high) / highest_high * 100
 
-    # Strength: how decisively it broke out
+    # 强度：突破的坚决程度
     if coverage_pct >= 80:
         strength = min(1.0, 0.6 + excess_pct / 5.0)
     elif coverage_pct >= 50:
@@ -208,7 +208,7 @@ def detect_breakout(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Condition 2: Trend Change (趋势改变)
+# 条件 2：趋势改变
 # ═══════════════════════════════════════════════════════════════════════
 
 def detect_trend_change(
@@ -217,16 +217,15 @@ def detect_trend_change(
     recent_lookback: int | None = None,
 ) -> SignalClue | None:
     """
-    Condition 2 — Trend Change (趋势改变):
-    Prior price action was in a downtrend or consolidation, and now
-    price has reversed upward, forming higher lows and breaking above
-    a recent swing high.
+    条件 2 — 趋势改变：
+    前期价格行为处于下降趋势或盘整中，现在价格已反转向上，
+    形成更高的低点并突破近期摆动高点。
 
-    Detection:
-      1. Previous phase: lower highs / lower lows (downtrend)
-         OR sideways / narrowing (consolidation)
-      2. Recent swing low formed and price bounced
-      3. Current close breaks above a swing high formed after the low
+    检测：
+      1. 前期阶段：更低的高点/更低的低点（下降趋势）
+         或横向/收窄（盘整）
+      2. 近期摆动低点已形成，价格反弹
+      3. 当前收盘价突破低点之后形成的摆动高点
     """
     if trend_lookback is None:
         trend_lookback = settings.TREND_CHANGE_LOOKBACK
@@ -248,7 +247,7 @@ def detect_trend_change(
     second_high_mean = float(second_half["high"].mean())
     second_low_mean = float(second_half["low"].mean())
 
-    # Detect prior phase type
+    # 检测前期阶段类型
     downtrend = (first_high_mean > second_high_mean * 1.02 and
                  first_low_mean > second_low_mean * 1.02)
     consolidation = (abs(first_high_mean - second_high_mean) / max(first_high_mean, 0.01) < 0.03 and
@@ -257,34 +256,34 @@ def detect_trend_change(
     if not (downtrend or consolidation):
         return None
 
-    # Find swing low in recent window
+    # 在近期窗口内寻找摆动低点
     recent = df.iloc[-recent_lookback:]
     swing_low_val = float(recent["low"].min())
     swing_low_loc = recent["low"].idxmin()
 
-    # Data after swing low
+    # 摆动低点之后的数据
     after_low = df.loc[swing_low_loc:]
     if len(after_low) < 2:
         return None
 
-    # Highest high between swing low and today (exclusive of today)
+    # 摆动低点与今日之间的最高高点（不含今日）
     after_except_today = after_low.iloc[:-1]
     if after_except_today.empty:
         return None
     swing_high_after_low = float(after_except_today["high"].max())
 
-    # Must break above this swing high
+    # 必须突破此摆动高点
     if current_close <= swing_high_after_low:
         return None
 
-    # Recovery magnitude from swing low
+    # 从摆动低点的反弹幅度
     recovery_pct = (current_close - swing_low_val) / swing_low_val * 100
     if recovery_pct < 2.0:
         return None
 
-    # Strength
+    # 强度
     recovery_strength = min(1.0, recovery_pct / 8.0)
-    phase_bonus = 1.0 if downtrend else 0.7  # downtrend reversal > consolidation breakout
+    phase_bonus = 1.0 if downtrend else 0.7  # 下降趋势反转 > 盘整突破
     strength = min(1.0, recovery_strength * phase_bonus)
 
     phase_label = "downtrend reversal" if downtrend else "consolidation breakout"
@@ -299,7 +298,7 @@ def detect_trend_change(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Condition 3: Gap / Wide Range (跳高缺口 或 高低价差大)
+# 条件 3：跳高缺口 / 宽幅
 # ═══════════════════════════════════════════════════════════════════════
 
 def detect_gap_or_wide_range(
@@ -309,12 +308,12 @@ def detect_gap_or_wide_range(
     range_multiple: float | None = None,
 ) -> SignalClue | None:
     """
-    Condition 3 — Gap Up or Wide Daily Range (跳高缺口或当日高低价差大):
-    The market "wakes up" from a quiet period.
+    条件 3 — 跳高缺口或宽幅：
+    市场从平静期"苏醒"。
 
-    Two sub-conditions (either or both):
-      a) Gap up: today's open > yesterday's close (跳高缺口)
-      b) Wide range: today's high-low range significantly exceeds recent average
+    两个子条件（满足任一或两个）：
+      a) 跳高缺口：今日开盘 > 昨日收盘
+      b) 宽幅：今日高低价差显著超过近期均值
     """
     if lookback is None:
         lookback = settings.BREAKOUT_LOOKBACK
@@ -346,7 +345,7 @@ def detect_gap_or_wide_range(
     if not (has_gap_up or has_wide_range):
         return None
 
-    parts = []
+    parts = []  # 描述片段列表
     strength = 0.0
 
     if has_gap_up:
@@ -367,16 +366,16 @@ def detect_gap_or_wide_range(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Combined Detection
+# 综合检测
 # ═══════════════════════════════════════════════════════════════════════
 
 def detect_all_three_conditions(df: pd.DataFrame) -> list[SignalClue]:
     """
-    Run all registered condition detectors against the DataFrame.
+    对 DataFrame 运行所有已注册的条件探测器。
 
-    Returns list of triggered conditions (0-N elements).
-    By default runs the 3 built-in conditions. Custom conditions
-    registered via register_condition() are included automatically.
+    返回触发的条件列表（0-N 个元素）。
+    默认运行 3 个内置条件。通过 register_condition()
+    注册的自定义条件也会自动包含。
     """
     clues: list[SignalClue] = []
     for detector in _CONDITION_REGISTRY.values():
@@ -385,18 +384,18 @@ def detect_all_three_conditions(df: pd.DataFrame) -> list[SignalClue]:
             if result is not None:
                 clues.append(result)
         except Exception:
-            # Silently skip detectors that fail — a custom condition
-            # shouldn't break the entire pipeline
+            # 静默跳过失败的探测器——自定义条件不应
+            # 破坏整个流水线
             continue
     return clues
 
 
 def check_buy_signal(clues: list[SignalClue]) -> tuple[bool, str]:
     """
-    Adam's Theory buy signal rule:
-    At least 2 of the 3 conditions must be satisfied simultaneously.
+    亚当理论买入信号规则：
+    3 个条件中至少须同时满足 2 个。
 
-    Returns (is_buy, reason).
+    返回 (is_buy, reason)。
     """
     n = len(clues)
     condition_names = {"breakout": "突破", "trend_change": "趋势改变", "range_expansion": "缺口/宽幅"}
@@ -418,13 +417,12 @@ def check_buy_signal(clues: list[SignalClue]) -> tuple[bool, str]:
 
 def find_structural_stop(df: pd.DataFrame, lookback: int = 40) -> float:
     """
-    Find a structural stop-loss level below the most recent swing low.
+    寻找最近摆动低点下方的结构性止损位。
 
-    Structural stop = the lowest low in the recent lookback window,
-    representing the nearest support level that, if broken, invalidates
-    the bullish thesis.
+    结构性止损 = 近期 lookback 窗口内的最低低点，
+    代表最近的支撑位，若被跌破则多头逻辑失效。
 
-    Returns the stop price (float).
+    返回止损价格 (float)。
     """
     if len(df) < 10:
         return float(df["low"].min())
@@ -433,17 +431,17 @@ def find_structural_stop(df: pd.DataFrame, lookback: int = 40) -> float:
     swing_low = float(recent["low"].min())
     current_close = float(df["close"].iloc[-1])
 
-    # Ensure stop is at least 1% below current price for breathing room
+    # 确保止损位至少低于当前价格 1%，预留缓冲空间
     if (current_close - swing_low) / current_close < 0.01:
         swing_low = current_close * 0.97
 
     return round(swing_low, 2)
 
 
-# ── Auto-register built-in conditions ─────────────────────────────────────
-# These are the three classical Adam's Theory entry conditions.
-# They register on import; external code can add custom conditions
-# via register_condition() or remove defaults via unregister_condition().
+# ── 自动注册内置条件 ────────────────────────────────────────────────────
+# 这是三个经典的亚当理论入场条件。
+# 在导入时自动注册；外部代码可通过
+# register_condition() 添加自定义条件，或通过 unregister_condition() 移除默认条件。
 
 register_condition("breakout", detect_breakout)
 register_condition("trend_change", detect_trend_change)

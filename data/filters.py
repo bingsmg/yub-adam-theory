@@ -1,8 +1,8 @@
 """
-Business filtering and classification for A-share stocks.
+A 股业务过滤与分类。
 
-Board classification, stock list retrieval, staleness detection,
-and pre-screen active-stock filtering — all independent of storage I/O.
+板块分类、股票列表获取、过期检测，
+以及活跃股票预筛选 —— 所有操作独立于存储 I/O。
 """
 
 from __future__ import annotations
@@ -17,9 +17,9 @@ from config.settings import settings
 
 
 def get_board(symbol: str) -> str:
-    """Determine the trading board from a 6-digit A-share symbol.
+    """根据 6 位 A 股代码判断所属交易板块。
 
-    Returns one of: 'main', 'chinext', 'star', 'bse'
+    返回以下之一：'main'（主板）、'chinext'（创业板）、'star'（科创板）、'bse'（北交所）
     """
     code = str(symbol).zfill(6)
     if code.startswith(('300', '301')):
@@ -32,13 +32,13 @@ def get_board(symbol: str) -> str:
 
 
 def get_stock_list(fetcher=None) -> pd.DataFrame:
-    """Get full A-share stock list via the configured data source.
+    """通过已配置的数据源获取完整的 A 股股票列表。
 
-    Args:
-        fetcher: Optional DataSource instance.  If None, uses get_fetcher()
-                 which reads DATA_SOURCE_ORDER from config.
+    参数:
+        fetcher: 可选的 DataSource 实例。若为 None，则使用 get_fetcher()
+                 （从配置中读取 DATA_SOURCE_ORDER）。
 
-    Returns DataFrame with columns: symbol, name, code
+    返回包含 symbol、name、code 列的 DataFrame
     """
     if fetcher is None:
         from data.sources import get_fetcher
@@ -51,12 +51,12 @@ def get_stale_stocks(
     stocks_dir: str | None = None,
     reference_date: str | None = None,
 ) -> dict[str, pd.Timestamp | None]:
-    """Find stocks whose last data date is before the reference date.
+    """查找最后数据日期早于参考日期的股票。
 
-    Reads only the 'date' column from each stock file to find its max date.
-    Much faster than loading all data.
+    仅从每个股票文件中读取 'date' 列以查找其最大日期。
+    比加载全部数据快得多。
 
-    Returns dict mapping symbol -> last_date (None if file does not exist).
+    返回 symbol -> last_date 的映射字典（文件不存在时为 None）。
     """
     if stocks_dir is None:
         stocks_dir = str(settings.STOCKS_DIR)
@@ -90,14 +90,14 @@ def filter_active_stocks(
     top_n: int | None = None,
 ) -> list[dict]:
     """
-    Filter to the most active stocks for analysis.
+    筛选出最活跃的股票进行分析。
 
-    Active = highest (volume × close) on the most recent date.
+    活跃度 = 最近日期上（成交量 × 收盘价）最高。
 
-    If master is None, uses load_latest_snapshot() which reads only the
-    last row of each stock file — much faster than loading all data.
+    若 master 为 None，则使用 load_latest_snapshot()，
+    该方法仅读取每只股票文件的最后一行 —— 比加载全部数据快得多。
 
-    Returns list of dicts: [{symbol, name, close, ...}]
+    返回字典列表：[{symbol, name, close, ...}]
     """
     if top_n is None:
         top_n = settings.MAX_STOCKS_TO_ANALYZE
@@ -113,15 +113,15 @@ def filter_active_stocks(
     if latest.empty:
         return []
 
-    # Exclude ST
+    # 排除 ST 股
     if 'name' in latest.columns:
         latest = latest[~latest['name'].str.contains('ST|退', na=False)]
 
-    # Exclude penny stocks
+    # 排除低价股（仙股）
     latest = latest[latest['close'] >= settings.MIN_PRICE]
     latest = latest[latest['volume'] > 0]
 
-    # Exclude boards without trading permission
+    # 排除无交易权限的板块
     if not settings.ALLOW_CHINEXT:
         latest = latest[~latest['symbol'].astype(str).str.match(r'^30[01]')]
     if not settings.ALLOW_STAR_MARKET:
@@ -129,7 +129,7 @@ def filter_active_stocks(
     if not settings.ALLOW_BSE:
         latest = latest[~latest['symbol'].astype(str).str.match(r'^[84]')]
 
-    # Activity score
+    # 活跃度评分
     latest['_score'] = latest['volume'].fillna(0) * latest['close'].fillna(0)
     latest = latest.sort_values('_score', ascending=False)
     latest = latest.head(top_n)

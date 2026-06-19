@@ -1,4 +1,4 @@
-"""Rich console output for daily recommendations."""
+"""每日推荐的 Rich 控制台输出。"""
 
 from __future__ import annotations
 
@@ -23,10 +23,10 @@ def _clue_short(clue_type: str) -> str:
 
 
 def print_recommendations(result: DailyRecommendation) -> None:
-    """Print Adam's Theory recommendation report."""
+    """打印亚当理论推荐报告。"""
     console = Console()
 
-    # ── Header ──
+    # ── 头部 ──
     header_text = Text()
     header_text.append("Adam's Theory A-Share Buy Recommendations\n", style="bold cyan underline")
     header_text.append(f"Date: {result.market_date}  |  ", style="dim")
@@ -40,7 +40,7 @@ def print_recommendations(result: DailyRecommendation) -> None:
         console.print("[yellow]No buy signals — fewer than 2 conditions met for any stock.[/yellow]")
         return
 
-    # ── Summary Table ──
+    # ── 摘要表格 ──
     table = Table(title="Top Recommendations", box=box.SIMPLE_HEAD, header_style="bold white")
     table.add_column("#", style="dim", width=3)
     table.add_column("Code", width=8)
@@ -76,7 +76,7 @@ def print_recommendations(result: DailyRecommendation) -> None:
     console.print("[dim]B=Breakout(突破) T=Trend Change(趋势改变) R=Gap/Wide Range(缺口/宽幅)[/dim]")
     console.print()
 
-    # ── Detailed Reasoning ──
+    # ── 详细分析 ──
     for i, rec in enumerate(result.recommendations, 1):
         console.print(rec.reason)
         console.print()

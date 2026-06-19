@@ -1,8 +1,7 @@
 """
-Data pipeline orchestration — full backfill and incremental update.
+数据管道编排 — 全量回填与增量更新。
 
-Orchestrates data sources, parallel fetching, and storage to produce
-stock-partitioned parquet files under output/stocks/.
+协调数据源、并行获取和存储，生成 output/stocks/ 下按股票分区的 parquet 文件。
 """
 
 from __future__ import annotations
@@ -30,22 +29,22 @@ def build_all_stocks_parquet(
     output_path: str | None = None,
     fetcher=None,
     chunk_size: int = 200,
+    force: bool = False,
 ) -> int:
     """
-    Download ALL stocks' daily data, saving to stock-partitioned
-    files under output/stocks/. Uses chunked parallel fetch with
-    incremental saves — if interrupted, resume will skip already-saved stocks.
+    下载所有股票的日线数据，保存到 output/stocks/ 下按股票分区的文件。
+    使用分块并行获取与增量保存 — 若中断，断点续传将跳过已保存的股票。
 
     Args:
-        stock_list: DataFrame from get_stock_list().
-        start_date: 'YYYY-MM-DD'.
-        end_date: 'YYYY-MM-DD'.
-        output_path: Ignored (kept for compatibility).
-        fetcher: Optional DataSource.  If None, uses get_fetcher().
-        chunk_size: Symbols per chunk (save after each chunk).
+        stock_list: 来自 get_stock_list() 的 DataFrame。
+        start_date: 'YYYY-MM-DD'。
+        end_date: 'YYYY-MM-DD'。
+        output_path: 忽略（保留以兼容）。
+        fetcher: 可选 DataSource。若为 None，则使用 get_fetcher()。
+        chunk_size: 每块股票数量（每块后保存）。
 
     Returns:
-        Number of stocks successfully fetched and saved.
+        成功获取并保存的股票数量。
     """
     if fetcher is None:
         from data.sources import get_fetcher
@@ -54,30 +53,33 @@ def build_all_stocks_parquet(
     stocks_dir = str(settings.STOCKS_DIR)
     os.makedirs(stocks_dir, exist_ok=True)
 
-    # Resume: check existing stock files for already-downloaded symbols
+    # 断点续传：检查已下载的股票文件
     existing_symbols = set()
-    if os.path.isdir(stocks_dir):
+    if not force and os.path.isdir(stocks_dir):
         for fname in os.listdir(stocks_dir):
             if fname.endswith('.parquet'):
                 existing_symbols.add(fname.replace('.parquet', ''))
         if existing_symbols:
-            logger.info(f"Resuming: {len(existing_symbols)} stocks already in {stocks_dir}")
+            logger.info(f"断点续传：{len(existing_symbols)} 只股票已存在于 {stocks_dir}")
 
-    remaining = stock_list[~stock_list['symbol'].isin(existing_symbols)]
+    if force:
+        logger.info("强制模式：重新下载所有股票")
+
+    remaining = stock_list[~stock_list['symbol'].isin(existing_symbols)] if not force else stock_list
     if remaining.empty:
-        logger.info("All stocks already downloaded!")
+        logger.info("所有股票已下载完成！")
         return len(existing_symbols)
 
     total = len(remaining)
-    logger.info(f"Building: {total} stocks to fetch via {fetcher.name}, {start_date} → {end_date}")
-    logger.info(f"Chunk size: {chunk_size}, max workers: {settings.FETCH_MAX_WORKERS}, delay: {settings.FETCH_DELAY_SECONDS}s")
+    logger.info(f"开始构建：{total} 只股票需获取，数据源 {fetcher.name}，{start_date} → {end_date}")
+    logger.info(f"块大小：{chunk_size}，最大并发数：{settings.FETCH_MAX_WORKERS}，延迟：{settings.FETCH_DELAY_SECONDS}s")
 
     name_map = dict(zip(stock_list['symbol'], stock_list['name']))
 
     from data.sources.parallel import fetch_batch_parallel
 
     def _fetch_one(sym: str, s: str, e: str):
-        """Uses fetch_with_fallback with a 60s timeout per stock."""
+        """使用 fetch_with_fallback，每只股票 60 秒超时。"""
         from data.sources.strategy import fetch_with_fallback
         from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
@@ -150,18 +152,18 @@ def update_latest_days(
     fetcher=None,
 ):
     """
-    Fetch new trading days and save as stock-partitioned parquet files.
+    获取新的交易日数据并保存为按股票分区的 parquet 文件。
 
-    Instead of loading ALL data, checks each stock file's last date
-    to find stale stocks. Much more efficient for large universes.
+    不加载全部数据，而是检查每个股票文件的最后日期以找出过期股票。
+    对大规模股票池效率更高。
 
     Args:
-        stock_list: DataFrame with [symbol, name, code] columns.
-        master_path: Ignored (kept for compatibility).
-        fetcher: Optional DataSource.  If None, uses get_fetcher().
+        stock_list: 包含 [symbol, name, code] 列的 DataFrame。
+        master_path: 忽略（保留以兼容）。
+        fetcher: 可选 DataSource。若为 None，则使用 get_fetcher()。
 
     Returns:
-        Full merged DataFrame of all stocks (same as load_all_stocks()).
+        所有股票的完整合并 DataFrame（同 load_all_stocks()）。
     """
     if fetcher is None:
         from data.sources import get_fetcher

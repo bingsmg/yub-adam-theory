@@ -20,7 +20,6 @@ class AdamSettings(BaseSettings):
 
     # --- Detection thresholds ---
     BREAKOUT_LOOKBACK: int = 20      # Bars to consider for breakout high
-    BREAKOUT_THRESHOLD_PCT: float = 0.98  # Close must exceed this fraction of lookback high
     TREND_CHANGE_LOOKBACK: int = 40  # Longer window for trend change detection
     TREND_CHANGE_RECENT: int = 15    # Recent window for swing low/high identification
     RANGE_EXPANSION_MULTIPLE: float = 1.5  # Current range vs average range multiplier
@@ -28,8 +27,6 @@ class AdamSettings(BaseSettings):
 
     # --- Stock filtering (pre-screen) ---
     MIN_PRICE: float = 3.0           # Exclude penny stocks below this price (RMB)
-    MIN_VOLUME_RATIO: float = 0.3    # Minimum 5-day volume ratio for liquidity
-    MIN_LISTING_DAYS: int = 60       # Stock must have at least this many trading days
     MAX_STOCKS_TO_ANALYZE: int = 5000  # Pre-screen to top N candidates (5000 = effectively all)
 
     # --- Board permissions ---
@@ -78,7 +75,7 @@ class AdamSettings(BaseSettings):
     # --- Reporting ---
     TOP_N_RECOMMENDATIONS: int = 20  # Number of recommendations to output
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "case_sensitive": False}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "case_sensitive": False, "extra": "ignore"}
 
 
 # Singleton
