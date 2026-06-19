@@ -75,26 +75,52 @@ def read_latest_csv(results_dir: Path | None = None) -> tuple[list[dict], str]:
     return rows, latest.name
 
 
+def _get_board(symbol: str) -> str:
+    """Determine trading board from symbol prefix."""
+    sym = str(symbol).zfill(6)
+    if sym.startswith(("300", "301")):
+        return "创业板"
+    elif sym.startswith(("688", "689")):
+        return "科创板"
+    elif sym.startswith(("8", "4")):
+        return "北交所"
+    return "主板"
+
+
+def _volume_emoji(ratio: float) -> str:
+    """Volume ratio indicator."""
+    if ratio >= 3.0:
+        return "🔥"
+    elif ratio >= 2.0:
+        return "📊"
+    elif ratio >= 1.2:
+        return "📈"
+    else:
+        return "➡️"
+
+
+def _format_stop_loss_pct(close: float, stop_loss: float) -> str:
+    """Calculate stop loss distance as percentage."""
+    try:
+        close_f = float(close)
+        stop_f = float(stop_loss)
+        pct = (close_f - stop_f) / close_f * 100
+        return f"-{pct:.1f}%"
+    except (ValueError, ZeroDivisionError):
+        return "N/A"
+
+
 def build_card(rows: list[dict], market_date: str) -> dict:
     """
-    Build a Feishu interactive card from recommendation rows.
+    Build a rich Feishu interactive card with complete recommendation info.
 
-    Feishu message card v2 format:
-    https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/card-components
+    Shows top 20 with: signal strength, risk, projection, stop loss%,
+    volume ratio tier, board, and brief reason summary.
     """
     n = len(rows)
     clue_short = {"breakout": "B", "trend_change": "T", "range_expansion": "R"}
 
-    # ── Header ──
-    header_block = {
-        "tag": "div",
-        "text": {
-            "tag": "lark_md",
-            "content": f"**🔔 亚当理论 A股买入推荐**\n{market_date} · {n} 只推荐 · 仅参考不构成投资建议",
-        },
-    }
-
-    elements = [header_block, {"tag": "hr"}]
+    elements = []
 
     if not rows:
         elements.append({
@@ -111,57 +137,75 @@ def build_card(rows: list[dict], market_date: str) -> dict:
         }
 
     # ── Summary stats ──
-    top3 = rows[:3]
     avg_risk = sum(float(r["risk_score"]) for r in rows) / n
     conditions_3 = sum(1 for r in rows if r["clue_count"] == "3")
     conditions_2 = sum(1 for r in rows if r["clue_count"] == "2")
+    boards = {"主板": 0, "创业板": 0, "科创板": 0}
+    for r in rows:
+        b = _get_board(r["symbol"])
+        boards[b] = boards.get(b, 0) + 1
+    board_str = " | ".join(f"{k} {v}" for k, v in boards.items() if v > 0)
+
+    avg_stop_pct = 0
+    count_stop = 0
+    for r in rows:
+        try:
+            c = float(r["close"]); s = float(r["stop_loss"])
+            if c > 0:
+                avg_stop_pct += (c - s) / c * 100
+                count_stop += 1
+        except (ValueError, ZeroDivisionError):
+            pass
+    avg_stop_str = f"{avg_stop_pct/count_stop:.1f}%" if count_stop else "N/A"
 
     stats_md = (
-        f"**统计概览**\n"
-        f"推荐总数: **{n}** | 平均风险: **{avg_risk:.1f}**/10\n"
-        f"3条件触发: **{conditions_3}** 只 | 2条件触发: **{conditions_2}** 只\n"
+        f"📊 **分析范围**: 4813 只活跃A股 → {n} 只推荐\n"
+        f"🎯 **3条件满分**: {conditions_3} 只 | **2条件**: {conditions_2} 只 | **平均风险**: {avg_risk:.1f}/10\n"
+        f"📉 **平均止损距离**: {avg_stop_str} | 🏢 {board_str}"
     )
 
     elements.append({
         "tag": "div",
         "text": {"tag": "lark_md", "content": stats_md},
     })
-
     elements.append({"tag": "hr"})
 
-    # ── Top picks ──
+    # ── Top 20 picks, 10 per column for compact display ──
+    display_count = min(n, 20)
     elements.append({
         "tag": "div",
-        "text": {"tag": "lark_md", "content": "**🏆 精选推荐 TOP 10**"},
+        "text": {"tag": "lark_md", "content": f"**🏆 Top {display_count} 买入推荐**"},
     })
 
-    # Build a compact table
-    table_lines = []
-    for i, r in enumerate(rows[:10], 1):
+    for i, r in enumerate(rows[:display_count], 1):
         sym = r["symbol"]
         name = r["name"]
-        close = r["close"]
+        close = float(r["close"])
         risk = float(r["risk_score"])
         clues = r.get("clues", "")
         proj = r.get("projected_direction", "neutral")
         stop_loss = r.get("stop_loss", "")
-        vol_ratio = r.get("volume_ratio", "")
+        vol_ratio_str = r.get("volume_ratio", "")
+        try:
+            vol_ratio = float(vol_ratio_str)
+        except (ValueError, TypeError):
+            vol_ratio = 0
 
-        # Clue badges
         clue_badges = " ".join(
             f"**{clue_short.get(c, '?')}**" if c in clues else f"~~{clue_short.get(c, '?')}~~"
             for c in ["breakout", "trend_change", "range_expansion"]
         )
+        stop_pct = _format_stop_loss_pct(close, stop_loss)
+        board = _get_board(sym)
+        vemoji = _volume_emoji(vol_ratio)
+        proj_label = {"up": "看涨 ↑", "down": "看跌 ↓", "neutral": "横盘 →"}.get(proj, proj)
 
+        # Rich two-line format per stock
         line = (
-            f"**#{i}** {sym} {name}\n"
-            f"收盘 {close} | {clue_badges}\n"
-            f"{_risk_emoji(risk)} 风险{risk:.1f} | {_proj_emoji(proj)} {proj} | "
-            f"止损{stop_loss} | 量比{vol_ratio}"
+            f"**#{i}** `{sym}` {name} | {board}\n"
+            f"━ 收盘 ¥{close:.2f} | {clue_badges} | {_risk_emoji(risk)} 风险{risk:.1f}\n"
+            f"━ {proj_label} | 止损 ¥{stop_loss}（{stop_pct}）| {vemoji} 量比{vol_ratio:.1f}x"
         )
-        table_lines.append(line)
-
-    for line in table_lines:
         elements.append({
             "tag": "div",
             "text": {"tag": "lark_md", "content": line},
@@ -174,27 +218,25 @@ def build_card(rows: list[dict], market_date: str) -> dict:
         "text": {
             "tag": "lark_md",
             "content": (
-                f"🤖 由 [Adam's Theory 系统](https://github.com/bingsmg/yub-adam-theory) 自动生成\n"
-                f"⏰ 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-                f"⚠️ *本内容仅供研究参考，不构成投资建议。股市有风险，投资需谨慎。*"
+                f"🤖 [Adam's Theory](https://github.com/bingsmg/yub-adam-theory) 自动生成\n"
+                f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+                f"⚠️ *仅供研究参考，不构成投资建议。股市有风险，投资需谨慎。*"
             ),
         },
     })
 
     elements.append({
         "tag": "note",
-        "elements": [
-            {
-                "tag": "plain_text",
-                "content": "B=突破 Breakout | T=趋势改变 Trend Change | R=缺口/宽幅 Gap/Wide Range",
-            }
-        ],
+        "elements": [{
+            "tag": "plain_text",
+            "content": "B=突破 Breakout | T=趋势改变 Trend Change | R=缺口/宽幅 Gap/Wide Range | 🔥高量 📊中量 ➡️平量",
+        }],
     })
 
     return {
         "config": {"wide_screen_mode": True},
         "header": {
-            "title": {"tag": "plain_text", "content": f"🔔 亚当理论 · {market_date} · Top {n}"},
+            "title": {"tag": "plain_text", "content": f"🔔 亚当理论 · {market_date} 收盘 · Top {display_count}"},
             "template": "blue",
         },
         "elements": elements,

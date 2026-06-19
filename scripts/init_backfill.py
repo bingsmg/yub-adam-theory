@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config.settings import settings, ensure_dirs
-from data.consolidated_store import get_stock_list_baostock, build_all_stocks_parquet
+from data.consolidated_store import get_stock_list, build_all_stocks_parquet
 from utils.logger import setup_logging
 from loguru import logger
 
@@ -46,8 +46,8 @@ def main():
     logger.info("=" * 60)
 
     # 1. Get stock list
-    logger.info("Fetching full stock list via baostock...")
-    stock_list = get_stock_list_baostock()
+    logger.info("Fetching full stock list...")
+    stock_list = get_stock_list()
     logger.info(f"Total stocks: {len(stock_list)}")
 
     if args.limit > 0:

@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config.settings import settings, ensure_dirs
 from config.schema import DailyRecommendation
 from data.consolidated_store import (
-    get_stock_list_baostock,
+    get_stock_list,
     load_all_stocks,
     update_latest_days,
     filter_active_stocks,
@@ -53,8 +53,9 @@ def main():
     ensure_dirs()
 
     parquet_path = settings.ALL_STOCKS_PATH
-    if not parquet_path.exists():
-        print(f"[ERROR] {parquet_path} not found.")
+    daily_dir = settings.DAILY_DIR
+    if not parquet_path.exists() and not (daily_dir.exists() and list(daily_dir.glob('*.parquet'))):
+        print(f"[ERROR] No data found at {parquet_path} or {daily_dir}/.")
         print("  Run 'python scripts/init_backfill.py' first.")
         sys.exit(1)
 
@@ -62,7 +63,7 @@ def main():
     if not args.no_update:
         logger.info("Updating data to latest trading day...")
         try:
-            stock_list = get_stock_list_baostock()
+            stock_list = get_stock_list()
             stock_list.to_csv(settings.STOCK_LIST_PATH, index=False)
         except Exception:
             stock_list = load_all_stocks(parquet_path)[['symbol','name']].drop_duplicates()

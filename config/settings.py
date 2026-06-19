@@ -47,13 +47,15 @@ class AdamSettings(BaseSettings):
 
     # --- Data source selection ---
     # Source priority order: first available wins when strategy is "priority".
-    # Built-in sources: "akshare", "baostock", "efinance"
-    DATA_SOURCE_ORDER: list[str] = ["baostock", "akshare"]  # baostock primary — akshare unstable (EastMoney blocks)
+    # Built-in sources: "tencent", "akshare", "baostock", "efinance"
+    # NOTE: "tencent" uses Tencent's free API (via akshare) — less aggressive
+    # rate limiting than EastMoney. "akshare" (EastMoney) may be blocked.
+    DATA_SOURCE_ORDER: list[str] = ["tencent", "baostock"]  # tencent primary (Tencent API), baostock fallback
     DATA_SOURCE_STRATEGY: str = "priority"      # "priority" | "fastest_first"
 
     # --- Data fetching parameters ---
-    FETCH_DELAY_SECONDS: float = 1.0   # Min delay between sequential requests
-    FETCH_MAX_WORKERS: int = 8         # Thread pool size for parallel fetch
+    FETCH_DELAY_SECONDS: float = 1.0   # Min delay between sequential requests (sequential mode, 1s is safe)
+    FETCH_MAX_WORKERS: int = 1         # Sequential fetch. Thread pool hangs with akshare multi-threaded.
     FETCH_RETRY_COUNT: int = 3         # Max retries per stock
 
     # --- Feishu notification ---

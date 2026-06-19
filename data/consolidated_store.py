@@ -79,16 +79,49 @@ def get_stock_list_baostock() -> pd.DataFrame:
     return fetcher.get_stock_list()
 
 
+def _save_results_to_daily(results: dict, stock_list: pd.DataFrame, daily_dir: str) -> int:
+    """Save fetched results incrementally to date-partitioned parquet files.
+
+    Returns number of stocks actually saved (with >= 30 bars).
+    """
+    if not results:
+        return 0
+
+    all_new = []
+    for sym, df in results.items():
+        if df is not None and not df.empty and len(df) >= 30:
+            all_new.append(df)
+
+    if not all_new:
+        return 0
+
+    new_data = pd.concat(all_new, ignore_index=True)
+    new_data['date'] = pd.to_datetime(new_data['date'])
+
+    for date_val, group in new_data.groupby('date'):
+        date_str = pd.Timestamp(date_val).strftime('%Y-%m-%d')
+        daily_path = os.path.join(daily_dir, f'{date_str}.parquet')
+        if os.path.exists(daily_path):
+            existing_day = pd.read_parquet(daily_path)
+            group = pd.concat([existing_day, group], ignore_index=True)
+            group = group.drop_duplicates(subset=['symbol'], keep='last')
+        group.to_parquet(daily_path, index=False)
+
+    return len(all_new)
+
+
 def build_all_stocks_parquet(
     stock_list: pd.DataFrame,
     start_date: str,
     end_date: str,
     output_path: str | None = None,
     fetcher=None,
+    chunk_size: int = 200,
 ) -> int:
     """
     Download ALL stocks' daily data, saving to date-partitioned
-    daily files under output/daily/. Uses parallel fetch when available.
+    daily files under output/daily/. Uses chunked parallel fetch with
+    incremental saves — if interrupted, resume will skip already-saved stocks.
 
     Args:
         stock_list: DataFrame from get_stock_list().
@@ -96,9 +129,10 @@ def build_all_stocks_parquet(
         end_date: 'YYYY-MM-DD'.
         output_path: Ignored (kept for compatibility). Uses daily dir.
         fetcher: Optional DataSource.  If None, uses get_fetcher().
+        chunk_size: Symbols per chunk (save after each chunk).
 
     Returns:
-        Number of stocks successfully fetched.
+        Number of stocks successfully fetched and saved.
     """
     if fetcher is None:
         from data.sources import get_fetcher
@@ -124,60 +158,81 @@ def build_all_stocks_parquet(
 
     total = len(remaining)
     logger.info(f"Building: {total} stocks to fetch via {fetcher.name}, {start_date} → {end_date}")
+    logger.info(f"Chunk size: {chunk_size}, max workers: {settings.FETCH_MAX_WORKERS}, delay: {settings.FETCH_DELAY_SECONDS}s")
 
-    # Use parallel fetch for speed (sequential fallback if max_workers=1)
+    # Build name lookup
+    name_map = dict(zip(stock_list['symbol'], stock_list['name']))
+
     from data.sources.parallel import fetch_batch_parallel
 
     def _fetch_one(sym: str, s: str, e: str):
-        """Closure capturing stock_list for name lookup."""
-        name = stock_list.loc[stock_list['symbol'] == sym, 'name']
-        name_val = name.iloc[0] if not name.empty else ''
-        df = fetcher.fetch_daily_kline(sym, s, e)
-        if df is not None and not df.empty:
-            if 'symbol' not in df.columns:
-                df['symbol'] = sym
-            if 'name' not in df.columns:
-                df['name'] = name_val
-        return df
+        """Uses fetch_with_fallback with a 60s timeout per stock."""
+        from data.sources.strategy import fetch_with_fallback
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError
+
+        def _do_fetch():
+            df = fetch_with_fallback(sym, s, e)
+            if df is not None and not df.empty:
+                if 'symbol' not in df.columns:
+                    df['symbol'] = sym
+                if 'name' not in df.columns:
+                    df['name'] = name_map.get(sym, '')
+            return df
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(_do_fetch)
+                return future.result(timeout=60)
+        except TimeoutError:
+            logger.warning(f"Timeout fetching {sym} after 60s")
+            return None
+        except Exception as exc:
+            logger.debug(f"Error fetching {sym}: {exc}")
+            return None
 
     t0 = time.time()
     symbols_to_fetch = remaining['symbol'].tolist()
+    total_saved = 0
+    total_fetched = 0
 
-    results = fetch_batch_parallel(
-        fetch_fn=_fetch_one,
-        symbols=symbols_to_fetch,
-        start_date=start_date,
-        end_date=end_date,
-        max_workers=settings.FETCH_MAX_WORKERS,
-        delay_per_worker=settings.FETCH_DELAY_SECONDS,
-        progress_every=200,
-    )
+    # Process in chunks — save after each chunk so resumed runs don't lose work
+    for chunk_start in range(0, len(symbols_to_fetch), chunk_size):
+        chunk = symbols_to_fetch[chunk_start:chunk_start + chunk_size]
+        chunk_num = chunk_start // chunk_size + 1
+        total_chunks = (len(symbols_to_fetch) + chunk_size - 1) // chunk_size
 
-    # Write results to daily parquet files
-    if results:
-        all_new = []
-        for sym, df in results.items():
-            if len(df) >= 30:
-                all_new.append(df)
+        logger.info(f"Chunk {chunk_num}/{total_chunks}: {len(chunk)} symbols starting at {chunk[0]}")
 
-        if all_new:
-            new_data = pd.concat(all_new, ignore_index=True)
-            new_data['date'] = pd.to_datetime(new_data['date'])
+        results = fetch_batch_parallel(
+            fetch_fn=_fetch_one,
+            symbols=chunk,
+            start_date=start_date,
+            end_date=end_date,
+            max_workers=settings.FETCH_MAX_WORKERS,
+            delay_per_worker=settings.FETCH_DELAY_SECONDS,
+            progress_every=chunk_size,  # Only log at chunk boundaries
+        )
 
-            for date_val, group in new_data.groupby('date'):
-                date_str = pd.Timestamp(date_val).strftime('%Y-%m-%d')
-                daily_path = os.path.join(daily_dir, f'{date_str}.parquet')
-                if os.path.exists(daily_path):
-                    existing_day = pd.read_parquet(daily_path)
-                    group = pd.concat([existing_day, group], ignore_index=True)
-                    group = group.drop_duplicates(subset=['symbol'], keep='last')
-                group.to_parquet(daily_path, index=False)
+        total_fetched += len(results)
 
-    success = len(results)
+        # Save chunk results immediately
+        saved = _save_results_to_daily(results, stock_list, daily_dir)
+        total_saved += saved
+
+        elapsed = time.time() - t0
+        rate = total_fetched / elapsed if elapsed > 0 else 0
+        remaining_stocks = len(symbols_to_fetch) - total_fetched
+        eta = remaining_stocks / rate if rate > 0 else 0
+
+        logger.info(
+            f"Progress: {total_fetched}/{len(symbols_to_fetch)} fetched, "
+            f"{total_saved} saved, {elapsed/60:.0f}min elapsed, ~{eta/60:.0f}min left"
+        )
+
     elapsed = time.time() - t0
-    logger.info(f"Done: {success} stocks saved to {daily_dir} in {elapsed/60:.0f}min")
+    logger.info(f"Done: {total_saved} stocks saved to {daily_dir} in {elapsed/60:.0f}min")
 
-    return success
+    return total_saved
 
 
 def load_all_stocks(path: str | None = None, daily_dir: str | None = None) -> pd.DataFrame:
@@ -274,7 +329,8 @@ def update_latest_days(
     from data.sources.parallel import fetch_batch_parallel
 
     def _fetch_one(sym: str, s: str, e: str):
-        df = fetcher.fetch_daily_kline(sym, s, e)
+        from data.sources.strategy import fetch_with_fallback
+        df = fetch_with_fallback(sym, s, e)
         if df is not None and not df.empty:
             if 'symbol' not in df.columns:
                 df['symbol'] = sym

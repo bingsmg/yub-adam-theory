@@ -21,11 +21,13 @@ def _resolve_source(name: str) -> Optional[DataSource]:
     from .baostock_source import BaostockDataSource
     from .akshare_source import AkshareDataSource
     from .ef_source import EfinanceDataSource
+    from .tx_source import TencentDataSource
 
     registry = {
         "baostock": BaostockDataSource,
         "akshare": AkshareDataSource,
         "efinance": EfinanceDataSource,
+        "tencent": TencentDataSource,
     }
 
     cls = registry.get(name.lower())
