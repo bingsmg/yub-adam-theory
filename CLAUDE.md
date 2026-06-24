@@ -31,11 +31,20 @@ python scripts/daily_update.py --limit 200            # Scan top 200 active stoc
 python scripts/daily_update.py --output console       # Console output only (no HTML)
 python scripts/daily_update.py --output html          # HTML report only, auto-open browser
 
-# Notebook
-jupyter notebook adam_theory_pipeline.ipynb
+# ── Scheduled automation ─────────────────────────────────────
+
+# Windows Task Scheduler (推荐：本地主力方案)
+scripts\run_daily.bat                    # 在任务计划程序中配置每天 21:00 运行
+powershell -ExecutionPolicy Bypass -File scripts\run_daily.ps1  # PowerShell 增强版（含通知）
+
+# WSL cron (替代方案)
+bash scripts/cron_daily.sh               # 在 WSL crontab 中配置
 
 # Force specific data source
 DATA_SOURCE_ORDER='["baostock"]' python scripts/init_backfill.py --limit 50
+
+# Notebook
+jupyter notebook adam_theory_pipeline.ipynb
 ```
 
 ## Architecture
@@ -144,3 +153,50 @@ Filtering happens in `filter_active_stocks()` — the pre-screen gate, before an
 - **New IPOs**: Stocks listed < 30 trading days ago are filtered out (minimum 30 bars required). They don't cause errors but are skipped.
 - **2026-06-12 data**: Only available after market close (after 3 PM China time). 2026-06-11 is the latest complete trading day.
 - **HTML report date filenames**: Use `strftime('%Y-%m-%d')` not `isoformat()` — colons are invalid in Windows filenames.
+
+## Nightly automation
+
+项目支持三种定时运行方式，按推荐度排序：
+
+### 方案 A: Windows 任务计划程序（推荐）
+
+最简单可靠。你的电脑在国内能直接访问 A 股 API，无需 GitHub。
+
+```
+1. 打开"任务计划程序" (Win+R → taskschd.msc)
+2. 创建基本任务 → 名称：Adam's Theory Daily
+3. 触发器 → 每天 23:00（A 股收盘 15:00，数据 ~18:00 到位，23:00 非常稳妥）
+4. 操作 → 启动程序：
+     程序/脚本：E:\Projects\ClaudeCodeProjects\yd-project\scripts\run_daily.bat
+     起始于：   E:\Projects\ClaudeCodeProjects\yd-project
+5. 条件 → 取消"只有在计算机使用交流电源时才启动"（笔记本电脑注意）
+6. 设置 → 勾选"如果错过计划则立即运行"
+```
+
+日志会自动保存在 `output/logs/run_daily_YYYY-MM-DD_HHMMSS.log`，保留 30 天。
+
+PowerShell 增强版（失败时弹 Windows 通知）：
+```
+程序：powershell.exe
+参数：-ExecutionPolicy Bypass -File "E:\Projects\ClaudeCodeProjects\yd-project\scripts\run_daily.ps1"
+```
+
+### 方案 B: WSL cron（Linux 子系统）
+
+适合习惯命令行的用户。在 WSL 中配置 crontab：
+
+```bash
+# 编辑 crontab
+crontab -e
+# 添加：每天 23:00 运行
+0 23 * * * cd /mnt/e/Projects/ClaudeCodeProjects/yd-project && bash scripts/cron_daily.sh
+```
+
+### 飞书通知
+
+所有方案都支持飞书通知。在 `.env` 中配置：
+```bash
+FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+```
+
+获取方式：飞书群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人 → 复制 webhook URL

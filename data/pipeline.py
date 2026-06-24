@@ -195,7 +195,13 @@ def update_latest_days(
 
     from data.sources.parallel import fetch_batch_parallel
 
-    def _fetch_one(sym: str, s: str, e: str):
+    # 实时保存计数器（线程安全：每个股票独立文件，无冲突）
+    import threading
+    _save_lock = threading.Lock()
+    _saved_count = [0]  # mutable container for closure
+
+    def _fetch_and_save(sym: str, s: str, e: str):
+        """拉取一只股票并立即保存到 parquet 文件（防止中途崩溃丢失数据）。"""
         from data.sources.strategy import fetch_with_fallback
         df = fetch_with_fallback(sym, s, e)
         if df is not None and not df.empty:
@@ -203,10 +209,14 @@ def update_latest_days(
                 df['symbol'] = sym
             if 'name' not in df.columns:
                 df['name'] = name_map.get(sym, '')
+            # 立即保存：合并已有文件 → 去重 → 写入
+            _save_results_to_stocks({sym: df}, name_map, stocks_dir)
+            with _save_lock:
+                _saved_count[0] += 1
         return df
 
     results = fetch_batch_parallel(
-        fetch_fn=_fetch_one,
+        fetch_fn=_fetch_and_save,
         symbols=symbols_to_fetch,
         start_date=global_start,
         end_date=end_date,
@@ -215,11 +225,7 @@ def update_latest_days(
         progress_every=200,
     )
 
-    if results:
-        saved = _save_results_to_stocks(results, name_map, stocks_dir)
-        new_rows = sum(len(v) for v in results.values() if v is not None)
-        logger.info(f"Updated: {saved} stocks, ~{new_rows} new rows in {time.time()-t0:.0f}s")
-    else:
-        logger.info("No new data to add")
+    new_rows = sum(len(v) for v in results.values() if v is not None)
+    logger.info(f"Updated: {_saved_count[0]} stocks saved, ~{new_rows} new rows in {time.time()-t0:.0f}s")
 
     return load_all_stocks()

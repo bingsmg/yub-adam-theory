@@ -13,6 +13,8 @@
 | `check_coverage.py` | 数据覆盖率诊断：文件数、最新日期、预筛选模拟 | 按需 |
 | `notify_feishu.py` | 飞书机器人推送推荐结果 | 每日（CI/cron 调用） |
 | `cron_daily.sh` | WSL cron 定时任务脚本 | 定时 |
+| `run_daily.bat` | Windows 任务计划程序入口（.bat 版本） | 定时 |
+| `run_daily.ps1` | Windows 任务计划程序入口（PowerShell 增强版，含通知） | 定时 |
 
 ## 常用命令
 

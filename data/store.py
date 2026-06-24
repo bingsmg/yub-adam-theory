@@ -73,9 +73,10 @@ def _save_results_to_stocks(
     count = 0
 
     for sym, df in results.items():
-        if df is None or df.empty or len(df) < 30:
+        if df is None or df.empty:
             continue
 
+        # 增量更新可能只拉 1-2 天数据（<30 行），需要合并已有文件判定
         df = df.copy()
         if 'name' not in df.columns or df['name'].isna().all():
             df['name'] = name_map.get(sym, '')
@@ -87,6 +88,9 @@ def _save_results_to_stocks(
                 df = pd.concat([existing, df], ignore_index=True)
             except Exception:
                 pass
+        elif len(df) < 30:
+            # 新股票首次拉取，数据不足 30 根 K 线则跳过
+            continue
 
         _save_stock(sym, df, stocks_dir)
         count += 1

@@ -28,5 +28,6 @@ output/stock_list.csv
 # OS
 .DS_Store
 Thumbs.db
+output/logs/
 output/*.log
 .claude/
