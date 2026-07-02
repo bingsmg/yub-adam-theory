@@ -49,39 +49,26 @@ if not exist "%PROJECT_DIR%\.env" (
 REM 切换到项目目录
 cd /d "%PROJECT_DIR%"
 
-REM ── Step 1: 数据更新 + 分析 ────────────────────────────────────────────
+REM ── Step 1: 数据更新 + 分析 + 飞书通知 ─────────────────────────────────
 call :log ""
-call :log "[Step 1/3] Running daily update + analysis..."
+call :log "[Step 1/2] Running daily update + analysis + Feishu notification..."
 set "START_TIME=%TIME%"
 
-"%VENV_PYTHON%" scripts/daily_update.py --limit 500 --output both --log-level INFO >> "%LOG_FILE%" 2>&1
+"%VENV_PYTHON%" scripts/daily_update.py --limit 500 --output both --notify feishu --log-level INFO >> "%LOG_FILE%" 2>&1
 set "EXIT_CODE=%ERRORLEVEL%"
 
 if %EXIT_CODE% neq 0 (
     call :log "[WARN] daily_update.py exited with code %EXIT_CODE%"
     call :log "[FALLBACK] Retrying with --no-update (skip fetch, analyze cached data)..."
-    "%VENV_PYTHON%" scripts/daily_update.py --no-update --limit 500 --output both --log-level INFO >> "%LOG_FILE%" 2>&1
+    "%VENV_PYTHON%" scripts/daily_update.py --no-update --limit 500 --output both --notify feishu --log-level INFO >> "%LOG_FILE%" 2>&1
     set "EXIT_CODE=%ERRORLEVEL%"
 )
 
-call :log "[Step 1/3] Done. Started at %START_TIME%, finished at %TIME%"
+call :log "[Step 1/2] Done. Started at %START_TIME%, finished at %TIME%"
 
-REM ── Step 2: 飞书通知 ───────────────────────────────────────────────────
+REM ── Step 2: 清理旧日志（保留最近 30 天）────────────────────────────────
 call :log ""
-call :log "[Step 2/3] Sending Feishu notification..."
-
-"%VENV_PYTHON%" scripts/notify_feishu.py >> "%LOG_FILE%" 2>&1
-set "NOTIFY_CODE=%ERRORLEVEL%"
-
-if %NOTIFY_CODE% neq 0 (
-    call :log "[WARN] Feishu notification failed (exit code %NOTIFY_CODE%). Check FEISHU_WEBHOOK_URL in .env"
-) else (
-    call :log "[OK] Feishu notification sent"
-)
-
-REM ── Step 3: 清理旧日志（保留最近 30 天）────────────────────────────────
-call :log ""
-call :log "[Step 3/3] Cleaning up old logs (keeping last 30 days)..."
+call :log "[Step 2/2] Cleaning up old logs (keeping last 30 days)..."
 forfiles /p "%LOG_DIR%" /m "run_daily_*.log" /d -30 /c "cmd /c del @file" 2>nul
 call :log "[OK] Cleanup done"
 

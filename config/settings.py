@@ -59,6 +59,9 @@ class AdamSettings(BaseSettings):
     # --- Feishu notification ---
     FEISHU_WEBHOOK_URL: str = ""     # Feishu bot webhook URL for daily push
 
+    # --- WeChat Work (企业微信) notification ---
+    WECOM_WEBHOOK_URL: str = ""      # 企业微信群机器人 webhook URL
+
     # --- Scoring ---
     # Weights for compute_quality_score: [condition_count, projection, volume]
     SCORE_WEIGHTS: list[float] = [0.50, 0.30, 0.20]

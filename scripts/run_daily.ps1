@@ -97,15 +97,16 @@ Set-Location $ProjectDir
 # 记录开始时间
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
-# ── Step 1: 数据更新 + 分析 ──────────────────────────────────────────────
+# ── Step 1: 数据更新 + 分析 + 飞书通知 ──────────────────────────────────
 
 Write-Log "" "INFO"
-Write-Log "[Step 1/3] Running daily update..." "INFO"
+Write-Log "[Step 1/2] Running daily update + Feishu notification..." "INFO"
 
 $dailyArgs = @(
     "scripts/daily_update.py",
     "--limit", $Limit,
     "--output", "both",
+    "--notify", "feishu",
     "--log-level", "INFO"
 )
 if ($SkipUpdate) {
@@ -120,40 +121,22 @@ try {
 
     if ($proc.ExitCode -ne 0) {
         Write-Log "daily_update.py failed (exit $($proc.ExitCode)), retrying with --no-update..." "WARN"
-        $fallbackArgs = @("scripts/daily_update.py", "--no-update", "--limit", $Limit, "--output", "both", "--log-level", "INFO")
+        $fallbackArgs = @("scripts/daily_update.py", "--no-update", "--limit", $Limit, "--output", "both", "--notify", "feishu", "--log-level", "INFO")
         $proc = Start-Process -FilePath $PythonExe -ArgumentList $fallbackArgs `
             -NoNewWindow -Wait -PassThru
     }
 
     $exitCode = $proc.ExitCode
-    Write-Log "[Step 1/3] Done. Exit code: $exitCode, Elapsed: $([math]::Round($sw.Elapsed.TotalMinutes, 1))min" "INFO"
+    Write-Log "[Step 1/2] Done. Exit code: $exitCode, Elapsed: $([math]::Round($sw.Elapsed.TotalMinutes, 1))min" "INFO"
 } catch {
     Write-Log "daily_update.py crashed: $_" "ERROR"
     $exitCode = 99
 }
 
-# ── Step 2: 飞书通知 ─────────────────────────────────────────────────────
+# ── Step 2: 清理 ─────────────────────────────────────────────────────────
 
 Write-Log "" "INFO"
-Write-Log "[Step 2/3] Sending Feishu notification..." "INFO"
-
-try {
-    $notifyProc = Start-Process -FilePath $PythonExe `
-        -ArgumentList "scripts/notify_feishu.py" `
-        -NoNewWindow -Wait -PassThru
-    if ($notifyProc.ExitCode -eq 0) {
-        Write-Log "[OK] Feishu notification sent" "INFO"
-    } else {
-        Write-Log "Feishu notification failed (exit $($notifyProc.ExitCode))" "WARN"
-    }
-} catch {
-    Write-Log "Feishu notification error: $_" "WARN"
-}
-
-# ── Step 3: 清理 ─────────────────────────────────────────────────────────
-
-Write-Log "" "INFO"
-Write-Log "[Step 3/3] Cleaning up old logs (30 days)..." "INFO"
+Write-Log "[Step 2/2] Cleaning up old logs (30 days)..." "INFO"
 try {
     Get-ChildItem -Path $LogDir -Filter "run_daily_*.log" |
         Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } |
